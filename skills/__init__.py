@@ -1,1 +1,0 @@
-"""Explicitly allowlisted Karen skills."""

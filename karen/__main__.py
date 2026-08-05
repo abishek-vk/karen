@@ -1,10 +1,7 @@
-"""Command-line bootstrap for development diagnostics only."""
+"""Run Karen's text interface with ``python -m karen``."""
 
-from pathlib import Path
-
-from .app import KarenApplication
+from .text_app import main
 
 
 if __name__ == "__main__":
-    application = KarenApplication(Path(__file__).resolve().parent.parent / "data")
-    print(f"Karen AI initialized with model {application.settings.ollama_model}")
+    main()

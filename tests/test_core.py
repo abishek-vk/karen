@@ -1,8 +1,8 @@
 import pytest
 
-from core.intent import Intent, parse_intent
-from core.router import IntentRouter
-from skills.app_control import SkillResult
+from karen.core.intent import Intent, parse_intent
+from karen.core.router import IntentRouter
+from karen.skills.app_control import SkillResult
 
 
 def test_parse_intent_accepts_json_code_fence() -> None:
@@ -27,7 +27,7 @@ def test_router_blocks_confirmation_before_skill(monkeypatch) -> None:
         called = True
         return SkillResult(True, "unsafe")
 
-    monkeypatch.setattr("skills.app_control.open_application", fail_if_called)
+    monkeypatch.setattr("karen.skills.app_control.open_application", fail_if_called)
     result = IntentRouter().route(Intent("open_application", "notepad", {}, True))
 
     assert result.success is False

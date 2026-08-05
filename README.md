@@ -8,23 +8,26 @@ strict intent JSON, and only explicitly allowlisted skills can execute.
 
 ```text
 Karen/
-├── main.py                 # Interactive text loop
-├── core/
-│   ├── config.py           # Local Ollama settings
-│   ├── intent.py           # JSON parsing and validation
-│   ├── llm.py              # Ollama-backed LLM boundary and system prompt
-│   └── router.py           # Intent-to-skill dispatch
-├── skills/
-│   ├── app_control.py      # Notepad, Calculator, Chrome allowlist
-│   └── system.py           # Read-only OS/time/CPU/RAM information
+├── main.py                 # Compatibility entry point
+├── karen/
+│   ├── core/
+│   │   ├── config.py       # Local Ollama settings
+│   │   ├── intent.py       # JSON parsing and validation
+│   │   ├── llm.py          # Ollama-backed LLM boundary and system prompt
+│   │   └── router.py       # Intent-to-skill dispatch
+│   ├── skills/
+│   │   ├── app_control.py  # Notepad, Calculator, Chrome allowlist
+│   │   └── system.py       # Read-only OS/time/CPU/RAM information
+│   ├── ai/ollama.py        # Local Ollama HTTP client
+│   └── text_app.py         # Interactive text application
 ├── memory/memory.json      # Disabled by default; no conversation storage
 ├── config/settings.json    # Local model configuration
 ├── requirements.txt
 └── README.md
 ```
 
-The earlier reusable package under `karen/` remains available for the desktop
-application phases and supplies the low-level local Ollama client.
+All active application modules now live under the `karen/` package. The root
+`main.py` remains as a compatibility entry point for development.
 
 ## Setup
 
@@ -47,8 +50,10 @@ application phases and supplies the low-level local Ollama client.
 5. Start Ollama, then run Karen from the project directory:
 
    ```text
-   python main.py
+   python -m karen
    ```
+
+   For compatibility, `python main.py` starts the same text interface.
 
 No cloud API, telemetry, browser history, clipboard, or recording is used.
 Ollama is restricted by the client to a local HTTP endpoint.
