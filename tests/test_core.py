@@ -1,8 +1,11 @@
 import pytest
 
+from karen.core.confirmation import ConfirmationManager
+from karen.core.fast_path import parse_fast_path
 from karen.core.intent import Intent, parse_intent
 from karen.core.router import IntentRouter
 from karen.skills.app_control import SkillResult
+from karen.text_app import process_text
 
 
 def test_parse_intent_accepts_json_code_fence() -> None:
@@ -33,6 +36,39 @@ def test_router_blocks_confirmation_before_skill(monkeypatch) -> None:
     assert result.success is False
     assert called is False
     assert "confirmation" in result.message
+
+
+def test_fast_path_handles_common_application_command() -> None:
+    assert parse_fast_path("Please open Notepad!") == Intent(
+        "open_application", "notepad", {}, False
+    )
+    assert parse_fast_path("run whoami") is None
+
+
+def test_confirmation_state_approves_exact_pending_intent(monkeypatch) -> None:
+    executed = []
+
+    def execute(target):
+        executed.append(target)
+        return SkillResult(True, "Opening Notepad.")
+
+    monkeypatch.setattr("karen.skills.app_control.open_application", execute)
+    confirmations = ConfirmationManager()
+    router = IntentRouter()
+    intent = Intent("open_application", "notepad", {}, True)
+    confirmations.request(intent)
+
+    assert process_text("yes", object(), router, confirmations) == "Opening Notepad."
+    assert executed == ["notepad"]
+    assert confirmations.peek() is None
+
+
+def test_confirmation_state_can_cancel() -> None:
+    confirmations = ConfirmationManager()
+    confirmations.request(Intent("open_application", "notepad", {}, True))
+
+    assert process_text("no", object(), IntentRouter(), confirmations) == "Cancelled."
+    assert confirmations.peek() is None
 
 
 def test_router_returns_general_chat_response() -> None:

@@ -10,10 +10,16 @@ from karen.skills.app_control import SkillResult
 class IntentRouter:
     """Map intent names to skills; unknown intents never reach execution."""
 
-    def route(self, intent: Intent) -> SkillResult:
+    @staticmethod
+    def needs_confirmation(intent: Intent) -> bool:
+        """Apply policy in addition to the model's requested confirmation."""
+
+        return intent.requires_confirmation or intent.name in {"close_application"}
+
+    def route(self, intent: Intent, *, confirmed: bool = False) -> SkillResult:
         """Execute an approved intent and return a user-facing result."""
 
-        if intent.requires_confirmation:
+        if self.needs_confirmation(intent) and not confirmed:
             return SkillResult(False, "This action requires your confirmation before I can continue.")
         if intent.name == "open_application":
             return app_control.open_application(intent.target)

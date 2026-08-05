@@ -12,6 +12,19 @@ from typing import Any
 from .exceptions import ConfigurationError
 
 
+def _normalize_settings(values: dict[str, Any]) -> dict[str, Any]:
+    """Accept the original Phase 1 keys while using canonical names."""
+
+    normalized = dict(values)
+    if "ollama_model" not in normalized and "model" in normalized:
+        normalized["ollama_model"] = normalized["model"]
+    if "request_timeout_seconds" not in normalized and "timeout_seconds" in normalized:
+        normalized["request_timeout_seconds"] = normalized["timeout_seconds"]
+    normalized.pop("model", None)
+    normalized.pop("timeout_seconds", None)
+    return normalized
+
+
 @dataclass(slots=True)
 class Settings:
     """Runtime settings that are safe to persist as JSON."""
@@ -22,6 +35,18 @@ class Settings:
     privacy_mode: bool = True
     start_with_windows: bool = False
     log_level: str = "INFO"
+
+    @property
+    def model(self) -> str:
+        """Legacy alias for callers from the original text core."""
+
+        return self.ollama_model
+
+    @property
+    def timeout_seconds(self) -> float:
+        """Legacy alias for callers from the original text core."""
+
+        return self.request_timeout_seconds
 
 
 @dataclass(slots=True)
@@ -62,6 +87,8 @@ class ConfigurationStore:
                 values = json.load(file)
             if not isinstance(values, dict):
                 raise ValueError("configuration root must be an object")
+            if model is Settings:
+                values = _normalize_settings(values)
             return model(**values)
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
             raise ConfigurationError(f"Could not load {path.name}: {error}") from error

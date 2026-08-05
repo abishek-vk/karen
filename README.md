@@ -27,7 +27,9 @@ Karen/
 ```
 
 All active application modules now live under the `karen/` package. The root
-`main.py` remains as a compatibility entry point for development.
+`main.py` remains as a compatibility entry point for development. Configuration
+is managed by `karen.config`; the original `karen.core.config` import remains a
+compatibility wrapper.
 
 ## Setup
 
@@ -87,9 +89,8 @@ system configuration changes are not exposed to the router.
 
 ## Future expansion
 
-- Add deterministic fast-path parsing for common commands so they do not wait
-  for the LLM.
-- Add a confirmation service before any future sensitive skill.
+- Expand the deterministic fast-path parser for common commands.
+- Extend the in-memory confirmation service to future sensitive skills.
 - Add voice and wake-word adapters behind the same text input interface.
 - Add opt-in memory with explicit user consent and schema validation.
 - Add plugin registration with capability manifests and permission boundaries.
