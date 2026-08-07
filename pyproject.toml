@@ -11,6 +11,14 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+voice = [
+    "faster-whisper>=1.0",
+    "numpy>=1.26",
+    "openwakeword>=0.6",
+    "piper-tts>=1.2",
+    "sounddevice>=0.4",
+    "speechbrain>=1.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

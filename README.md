@@ -25,6 +25,8 @@ Karen/
 │   │   └── system.py       # Read-only OS/time/CPU/RAM information
 │   ├── ai/ollama.py        # Local Ollama HTTP client
 │   ├── text_app.py         # Interactive text application
+│   ├── ui/opening.py       # Animated-only graphical interface
+│   └── voice/              # Optional local voice adapters
 │   └── ui/opening.py       # Animated-only graphical interface
 ├── memory/memory.json      # Disabled by default; no conversation storage
 ├── config/settings.json    # Local model configuration (180s CPU-safe timeout)
@@ -70,6 +72,8 @@ compatibility wrapper.
    For compatibility, `python main.py` starts the same text interface.
 
 No cloud API, telemetry, browser history, clipboard, or recording is used.
+Voice support is optional and lazy-loaded. Install it with `pip install -e .[voice]`
+when local microphone input is desired.
 Ollama is restricted by the client to a local HTTP endpoint. When the GUI opens,
 Karen attempts to start `ollama serve` automatically; Qwen must already be
 installed locally with `ollama pull qwen3:4b`.

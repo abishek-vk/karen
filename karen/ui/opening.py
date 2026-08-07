@@ -18,6 +18,9 @@ from pathlib import Path
 
 from karen.core.application_service import ApplicationService
 from karen.text_app import build_application
+from karen.voice.contracts import VoiceError
+from karen.voice.recognizer import FasterWhisperRecognizer
+from karen.voice.service import VoiceService
 
 
 try:
@@ -59,6 +62,7 @@ class OpeningPage(tk.Tk):
         self._busy = False
         self._frame = 0
         self._service: ApplicationService | None = None
+        self._voice: VoiceService | None = None
         self._responses: queue.Queue[str] = queue.Queue()
         self._last_response = "Initialize Karen to begin your local session."
         self._model_status = "CHECKING LOCAL MODEL..."
@@ -135,6 +139,23 @@ class OpeningPage(tk.Tk):
             font=("Consolas", 9, "bold"),
         )
         self._send_button.place(relx=0.68, rely=0.88, anchor="center")
+        self._voice_button = tk.Button(
+            self,
+            text="MIC / PUSH TO TALK",
+            command=self._start_voice,
+            bg="#123449",
+            activebackground="#1c6073",
+            fg=BRIGHT_CYAN,
+            activeforeground="white",
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=7,
+            cursor="hand2",
+            state=tk.DISABLED,
+            font=("Consolas", 8, "bold"),
+        )
+        self._voice_button.place(relx=0.84, rely=0.88, anchor="center")
 
     def _initialize(self) -> None:
         """Activate commands while keeping the animated HUD as the only UI."""
@@ -150,8 +171,31 @@ class OpeningPage(tk.Tk):
         )
         self._command_entry.configure(state=tk.NORMAL)
         self._send_button.configure(state=tk.NORMAL)
+        self._voice_button.configure(state=tk.NORMAL)
         self._command_entry.focus_set()
         self._last_response = "Local session ready. Ask Karen a question or give a command."
+
+    def _start_voice(self) -> None:
+        if self._service is None or self._busy:
+            return
+        if self._voice is None:
+            self._voice = VoiceService(
+                self._service,
+                FasterWhisperRecognizer(model_size="tiny", record_seconds=5.0),
+            )
+        self._busy = True
+        self._voice_button.configure(state=tk.DISABLED, text="LISTENING...")
+        self._send_button.configure(state=tk.DISABLED)
+        self._last_response = "Listening locally... speak now."
+        threading.Thread(target=self._process_voice, daemon=True).start()
+
+    def _process_voice(self) -> None:
+        try:
+            result = self._voice.listen_and_process() if self._voice is not None else None
+            if result is not None:
+                self._responses.put(f"Heard: {result.transcript}  //  {result.response}")
+        except VoiceError as error:
+            self._responses.put(f"Voice unavailable: {error}")
 
     def _send_command(self) -> None:
         if self._service is None or self._busy:
@@ -180,6 +224,7 @@ class OpeningPage(tk.Tk):
         self._last_response = response
         self._busy = False
         self._send_button.configure(state=tk.NORMAL, text="SEND")
+        self._voice_button.configure(state=tk.NORMAL, text="MIC / PUSH TO TALK")
         self._command_entry.focus_set()
         self.after(60, self._poll_response)
 
