@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import os
 import subprocess
 from dataclasses import dataclass
@@ -82,6 +83,22 @@ def available_applications() -> tuple[str, ...]:
     return tuple(sorted(set(APPLICATIONS) | set(catalog)))
 
 
+def resolve_application_name(target: str | None) -> str | None:
+    """Resolve exact or high-confidence spoken names to catalog names."""
+
+    name = _application_name(target)
+    if name is None:
+        return None
+    choices = available_applications()
+    if name in choices:
+        return name
+    alias = BROWSER_ALIASES.get(name)
+    if alias in choices:
+        return alias
+    matches = difflib.get_close_matches(name, choices, n=1, cutoff=0.72)
+    return matches[0] if matches else None
+
+
 def _launch_catalog_entry(name: str) -> SkillResult:
     catalog = _catalog if _catalog is not None else refresh_application_catalog()
     discovered = catalog.get(name)
@@ -110,9 +127,9 @@ def _launch_catalog_entry(name: str) -> SkillResult:
 def open_application(target: str | None) -> SkillResult:
     """Launch an exact built-in or Start Menu-catalogued application."""
 
-    name = _application_name(target)
+    name = resolve_application_name(target)
     if name is None:
-        return SkillResult(False, "Tell me the exact name of the application to open.")
+        return SkillResult(False, "I couldn't match that voice command to an installed application.")
     if os.name != "nt":
         return SkillResult(False, "Application control is available on Windows only.")
     return _launch_catalog_entry(name)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from karen.skills.app_control import available_applications
+from karen.skills.app_control import resolve_application_name
 
 from .intent import Intent
 
@@ -51,7 +51,9 @@ def parse_fast_path(text: str) -> Intent | None:
         return Intent("open_folder", folder_match.group(1), {}, False)
 
     catalog_match = re.fullmatch(r"(?:please )?open (.+)", normalized)
-    if catalog_match and catalog_match.group(1) in available_applications():
-        return Intent("open_application", catalog_match.group(1), {}, False)
+    if catalog_match:
+        resolved = resolve_application_name(catalog_match.group(1))
+        if resolved is not None:
+            return Intent("open_application", resolved, {}, False)
 
     return None

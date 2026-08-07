@@ -181,7 +181,7 @@ class OpeningPage(tk.Tk):
         if self._voice is None:
             self._voice = VoiceService(
                 self._service,
-                FasterWhisperRecognizer(model_size="tiny", record_seconds=5.0),
+                FasterWhisperRecognizer(model_size="tiny.en", record_seconds=4.0)
             )
         self._busy = True
         self._voice_button.configure(state=tk.DISABLED, text="LISTENING...")

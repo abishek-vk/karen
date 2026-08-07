@@ -57,8 +57,11 @@ def test_fast_path_handles_common_application_command() -> None:
     assert parse_fast_path("open task manager") == Intent(
         "open_task_manager", None, {}, False
     )
-    assert parse_fast_path("open vs code") == Intent(
-        "open_application", "vs code", {}, False
+    assert parse_fast_path("open discord") == Intent(
+        "open_application", "discord", {}, False
+    )
+    assert parse_fast_path("open beekeeper studio") == Intent(
+        "open_application", "beekeeper studio", {}, False
     )
     assert parse_fast_path("open downloads") == Intent(
         "open_folder", "downloads", {}, False
