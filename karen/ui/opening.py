@@ -1,4 +1,4 @@
-"""Cinematic, privacy-first opening screen for Karen AI.
+"""Cinematic opening screen for Karen AI.
 
 This UI intentionally uses only Tkinter so the opening experience works before
 optional GUI dependencies are installed. It is inspired by futuristic HUDs,
@@ -246,7 +246,7 @@ class OpeningPage(tk.Tk):
                     if ready
                     else "OLLAMA ONLINE // INSTALL QWEN3:4B"
                     if available
-                    else "FAST PATH READY // OLLAMA OFFLINE"
+                    else "FAST PATH READY // MODEL STANDBY"
                 )
                 self.after(0, lambda: self._set_model_status(status))
 
@@ -499,6 +499,7 @@ class OpeningPage(tk.Tk):
                 anchor="center",
             )
 
+
         self.canvas.create_text(
             center_x,
             height * 0.68,
@@ -518,7 +519,7 @@ class OpeningPage(tk.Tk):
         self.canvas.create_text(
             28,
             height - 28,
-            text="OFFLINE MODE  •  NO TELEMETRY  •  ESC TO EXIT",
+            text="LOCAL SESSION  •  NO TELEMETRY  •  ESC TO EXIT",
             fill="#397082",
             font=label_font,
             anchor="w",
