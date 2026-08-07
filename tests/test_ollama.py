@@ -42,6 +42,9 @@ def test_chat_posts_only_to_local_ollama(monkeypatch) -> None:
     assert captured["request"].full_url == "http://127.0.0.1:11434/api/chat"
     body = json.loads(captured["request"].data.decode("utf-8"))
     assert body["stream"] is False
+    assert body["format"] == "json"
+    assert body["options"]["num_predict"] == 256
+    assert body["think"] is False
     assert captured["timeout"] == 60.0
 
 

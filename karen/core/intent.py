@@ -24,20 +24,28 @@ class Intent:
 
 
 def parse_intent(raw_response: str) -> Intent:
-    """Parse one JSON object, including models that wrap it in code fences."""
+    """Extract the first valid intent object from model output.
+
+    Qwen may wrap its answer in ``<think>`` text or repeat a JSON object.
+    We scan JSON object boundaries rather than trusting the final brace, while
+    still validating the resulting object strictly below.
+    """
 
     candidate = raw_response.strip()
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, re.DOTALL | re.IGNORECASE)
-    if fenced:
-        candidate = fenced.group(1)
-    else:
-        start, end = candidate.find("{"), candidate.rfind("}")
-        if start >= 0 and end > start:
-            candidate = candidate[start : end + 1]
-    try:
-        data = json.loads(candidate)
-    except json.JSONDecodeError as error:
-        raise ValueError("The model returned invalid intent JSON") from error
+    search_text = fenced.group(1) if fenced else candidate
+    decoder = json.JSONDecoder()
+    data: Any | None = None
+    for match in re.finditer(r"\{", search_text):
+        try:
+            parsed, _end = decoder.raw_decode(search_text[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            data = parsed
+            break
+    if data is None:
+        raise ValueError("The model returned invalid intent JSON")
     if not isinstance(data, dict):
         raise ValueError("Intent must be a JSON object")
 

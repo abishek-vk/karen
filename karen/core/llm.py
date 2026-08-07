@@ -20,6 +20,7 @@ Your responsibilities:
 
 Be concise, helpful, and natural.
 
+Return only one JSON object. Do not include analysis, markdown, or <think> tags.
 When a user asks for a computer action, return only a JSON object with these
 fields: intent, target, parameters, requires_confirmation. Supported intents are
 open_application, close_application, system_information, and general_chat.
@@ -40,6 +41,21 @@ class LocalLLM:
 
     def __init__(self, client: OllamaClient) -> None:
         self._client = client
+
+    def is_available(self) -> bool:
+        """Return whether the configured local model service is reachable."""
+
+        return self._client.is_available()
+
+    def ensure_available(self) -> bool:
+        """Start the local Ollama server when it is not already running."""
+
+        return self._client.ensure_available()
+
+    def has_model(self) -> bool:
+        """Return whether the configured model is installed locally."""
+
+        return self._client.has_model()
 
     def generate_intent(self, user_text: str) -> LLMResult:
         """Ask Ollama to classify a single user message as JSON intent."""

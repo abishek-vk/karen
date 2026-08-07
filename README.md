@@ -27,7 +27,7 @@ Karen/
 │   ├── text_app.py         # Interactive text application
 │   └── ui/opening.py       # Animated graphical opening page
 ├── memory/memory.json      # Disabled by default; no conversation storage
-├── config/settings.json    # Local model configuration
+├── config/settings.json    # Local model configuration (180s CPU-safe timeout)
 ├── requirements.txt
 └── README.md
 ```
@@ -70,7 +70,9 @@ compatibility wrapper.
    For compatibility, `python main.py` starts the same text interface.
 
 No cloud API, telemetry, browser history, clipboard, or recording is used.
-Ollama is restricted by the client to a local HTTP endpoint.
+Ollama is restricted by the client to a local HTTP endpoint. When the GUI opens,
+Karen attempts to start `ollama serve` automatically; Qwen must already be
+installed locally with `ollama pull qwen3:4b`.
 
 ## Example
 

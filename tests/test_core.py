@@ -21,6 +21,14 @@ def test_parse_intent_accepts_json_code_fence() -> None:
     assert intent == Intent("open_application", "notepad", {}, False)
 
 
+def test_parse_intent_handles_qwen_thinking_and_repeated_json() -> None:
+    raw = '<think>Reasoning text with an example.</think> '
+    raw += '{"intent":"general_chat","target":null,"parameters":{"response":"Hello!"},"requires_confirmation":false}'
+    raw += '\n{"intent":"general_chat","target":null,"parameters":{"response":"Duplicate"},"requires_confirmation":false}'
+
+    assert parse_intent(raw).parameters["response"] == "Hello!"
+
+
 def test_parse_intent_rejects_unsupported_action() -> None:
     with pytest.raises(ValueError, match="Unsupported intent"):
         parse_intent('{"intent":"run_shell","target":"whoami"}')

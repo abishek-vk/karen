@@ -31,7 +31,7 @@ class Settings:
 
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:4b"
-    request_timeout_seconds: float = 60.0
+    request_timeout_seconds: float = 180.0
     privacy_mode: bool = True
     start_with_windows: bool = False
     log_level: str = "INFO"

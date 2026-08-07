@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+import subprocess
+import time
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -50,6 +53,7 @@ class OllamaClient:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self._server_process: subprocess.Popen[bytes] | None = None
 
     def is_available(self) -> bool:
         """Return whether the local Ollama service responds to a health request."""
@@ -60,6 +64,53 @@ class OllamaClient:
                 return True
         except (HTTPError, URLError, OSError):
             return False
+
+    def has_model(self) -> bool:
+        """Return whether the configured model is installed locally."""
+
+        request = Request(f"{self.base_url}/api/tags", method="GET")
+        try:
+            with urlopen(request, timeout=min(self.timeout_seconds, 5.0)) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            models = payload.get("models", [])
+            if not isinstance(models, list):
+                return False
+            return any(
+                isinstance(model, dict) and model.get("name") == self.model
+                for model in models
+            )
+        except (HTTPError, URLError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return False
+
+    def ensure_available(self, wait_seconds: float = 8.0) -> bool:
+        """Start local Ollama if needed and wait briefly for its API."""
+
+        if self.is_available():
+            return True
+        executable = shutil.which("ollama")
+        if executable is None:
+            LOGGER.info("Ollama executable was not found on PATH")
+            return False
+        if self._server_process is None or self._server_process.poll() is not None:
+            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                self._server_process = subprocess.Popen(
+                    [executable, "serve"],
+                    shell=False,
+                    close_fds=True,
+                    creationflags=creation_flags,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except OSError:
+                LOGGER.exception("Could not start the local Ollama server")
+                return False
+        deadline = time.monotonic() + max(wait_seconds, 0.1)
+        while time.monotonic() < deadline:
+            if self.is_available():
+                return True
+            time.sleep(0.2)
+        return False
 
     def chat(self, messages: list[ChatMessage]) -> ChatResponse:
         """Generate a response from the local model.
@@ -77,6 +128,14 @@ class OllamaClient:
                 for message in messages
             ],
             "stream": False,
+            "format": "json",
+            # Keep routing responses bounded on consumer CPUs.
+            "options": {
+                "temperature": 0.1,
+                "num_predict": 256,
+            },
+            # Supported by recent Ollama versions for Qwen3.
+            "think": False,
         }
         request = Request(
             f"{self.base_url}/api/chat",

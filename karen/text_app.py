@@ -6,12 +6,11 @@ from pathlib import Path
 
 from karen.ai.ollama import OllamaClient
 from karen.config import ConfigurationStore
-from karen.core.confirmation import ConfirmationManager, parse_confirmation
-from karen.core.fast_path import parse_fast_path
-from karen.core.intent import Intent, parse_intent
+from karen.core.application_service import ApplicationService
+from karen.core.confirmation import ConfirmationManager
 from karen.core.llm import LocalLLM
 from karen.core.router import IntentRouter
-from karen.exceptions import LocalAIError
+
 
 
 EXIT_COMMANDS = frozenset({"exit", "quit", "goodbye"})
@@ -35,33 +34,12 @@ def process_text(
     router: IntentRouter,
     confirmations: ConfirmationManager | None = None,
 ) -> str:
-    """Process text through confirmation, fast-path, LLM, and routing."""
+    """Compatibility wrapper around the shared application service."""
 
-    confirmation_state = confirmations or ConfirmationManager()
-    try:
-        pending = confirmation_state.peek()
-        if pending is not None:
-            answer = parse_confirmation(text)
-            if answer is True:
-                approved = confirmation_state.consume()
-                if approved is not None:
-                    return router.route(approved, confirmed=True).message
-            elif answer is False:
-                confirmation_state.clear()
-                return "Cancelled."
-            else:
-                return "Please answer yes or no before I continue with the pending action."
-
-        intent = parse_fast_path(text)
-        if intent is None:
-            raw = llm.generate_intent(text)
-            intent = parse_intent(raw.content)
-        if router.needs_confirmation(intent):
-            confirmation_state.request(intent)
-            return "This action requires your confirmation. Say yes to continue or no to cancel."
-        return router.route(intent).message
-    except (ValueError, LocalAIError) as error:
-        return f"I couldn't safely process that request: {error}"
+    service = ApplicationService(llm, router)
+    if confirmations is not None:
+        service.confirmations = confirmations
+    return service.handle_text(text).message
 
 
 def main() -> None:

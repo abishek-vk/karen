@@ -8,11 +8,14 @@ not a reproduction of any specific film interface.
 from __future__ import annotations
 
 import math
-import platform
+
 import random
 import time
 import tkinter as tk
 from dataclasses import dataclass
+from pathlib import Path
+
+from karen.core.application_service import ApplicationService
 
 
 try:
@@ -96,12 +99,22 @@ class OpeningPage(tk.Tk):
         self._start_button.place(relx=0.5, rely=0.78, anchor="center")
 
     def _initialize(self) -> None:
+        """Transition from the welcome animation into the live dashboard."""
+
+        from karen.text_app import build_application
+
+        from .dashboard import DashboardPage
+
         self._started = True
         self._start_button.configure(
             text="  SYSTEMS ONLINE  ",
             state=tk.DISABLED,
             disabledforeground=GREEN,
         )
+        project_dir = Path(__file__).resolve().parents[2]
+        llm, router = build_application(project_dir)
+        self.withdraw()
+        DashboardPage(self, ApplicationService(llm, router))
 
     def _animate(self) -> None:
         self._frame += 1
