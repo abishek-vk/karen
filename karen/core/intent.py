@@ -9,7 +9,15 @@ from typing import Any
 
 
 SUPPORTED_INTENTS = frozenset(
-    {"open_application", "close_application", "system_information", "general_chat"}
+    {
+            "open_application",
+            "close_application",
+            "system_information",
+            "open_windows_settings",
+            "open_task_manager",
+            "open_folder",
+            "general_chat",
+        }
 )
 
 

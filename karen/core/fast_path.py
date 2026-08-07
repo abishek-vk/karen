@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from karen.skills.app_control import available_applications
+
 from .intent import Intent
 
 
@@ -11,6 +13,9 @@ _APPLICATION_COMMANDS = {
     "notepad": "notepad",
     "calculator": "calculator",
     "chrome": "chrome",
+    "vs code": "vs code",
+    "vscode": "vscode",
+    "edge": "edge",
 }
 
 
@@ -22,7 +27,10 @@ def parse_fast_path(text: str) -> Intent | None:
     """
 
     normalized = re.sub(r"\s+", " ", text.strip().lower().rstrip(".!?"))
-    match = re.fullmatch(r"(?:please )?open (notepad|calculator|chrome)", normalized)
+    match = re.fullmatch(
+        r"(?:please )?open (notepad|calculator|chrome|vs code|vscode|edge)",
+        normalized,
+    )
     if match:
         return Intent("open_application", _APPLICATION_COMMANDS[match.group(1)], {}, False)
 
@@ -31,5 +39,19 @@ def parse_fast_path(text: str) -> Intent | None:
 
     if normalized in {"show system information", "system information", "system status"}:
         return Intent("system_information", None, {}, False)
+
+    if normalized in {"open settings", "open windows settings", "open windows settings app"}:
+        return Intent("open_windows_settings", None, {}, False)
+
+    if normalized in {"open task manager", "start task manager"}:
+        return Intent("open_task_manager", None, {}, False)
+
+    folder_match = re.fullmatch(r"(?:please )?open (desktop|documents|downloads)", normalized)
+    if folder_match:
+        return Intent("open_folder", folder_match.group(1), {}, False)
+
+    catalog_match = re.fullmatch(r"(?:please )?open (.+)", normalized)
+    if catalog_match and catalog_match.group(1) in available_applications():
+        return Intent("open_application", catalog_match.group(1), {}, False)
 
     return None

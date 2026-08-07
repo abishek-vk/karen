@@ -54,6 +54,15 @@ def test_fast_path_handles_common_application_command() -> None:
     assert parse_fast_path("Please open Notepad!") == Intent(
         "open_application", "notepad", {}, False
     )
+    assert parse_fast_path("open task manager") == Intent(
+        "open_task_manager", None, {}, False
+    )
+    assert parse_fast_path("open vs code") == Intent(
+        "open_application", "vs code", {}, False
+    )
+    assert parse_fast_path("open downloads") == Intent(
+        "open_folder", "downloads", {}, False
+    )
     assert parse_fast_path("run whoami") is None
 
 
@@ -100,6 +109,14 @@ def test_permission_policy_requires_confirmation_for_closing() -> None:
     assert router.needs_confirmation(Intent("open_application", "notepad", {}, False)) is False
     assert router.needs_confirmation(Intent("close_application", "notepad", {}, False)) is True
     assert router.route(Intent("close_application", "notepad", {}, False)).success is False
+
+
+def test_registry_resolves_windows_skills() -> None:
+    registry = SkillRegistry.default()
+
+    assert registry.resolve("open_windows_settings") is not None
+    assert registry.resolve("open_task_manager") is not None
+    assert registry.resolve("open_folder") is not None
 
 
 def test_registry_rejects_unknown_intent() -> None:

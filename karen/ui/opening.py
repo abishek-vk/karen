@@ -8,14 +8,16 @@ not a reproduction of any specific film interface.
 from __future__ import annotations
 
 import math
-
+import queue
 import random
+import threading
 import time
 import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
 
 from karen.core.application_service import ApplicationService
+from karen.text_app import build_application
 
 
 try:
@@ -54,7 +56,12 @@ class OpeningPage(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
         self._started = False
+        self._busy = False
         self._frame = 0
+        self._service: ApplicationService | None = None
+        self._responses: queue.Queue[str] = queue.Queue()
+        self._last_response = "Initialize Karen to begin your local session."
+        self._model_status = "CHECKING LOCAL MODEL..."
         self._start_time = time.monotonic()
         self._particles = [
             Particle(
@@ -79,6 +86,8 @@ class OpeningPage(tk.Tk):
 
         self._build_controls()
         self.after(40, self._animate)
+        self.after(60, self._poll_response)
+        self.after(1000, self._refresh_ollama_status)
 
     def _build_controls(self) -> None:
         self._start_button = tk.Button(
@@ -98,23 +107,105 @@ class OpeningPage(tk.Tk):
         )
         self._start_button.place(relx=0.5, rely=0.78, anchor="center")
 
+        self._command_entry = tk.Entry(
+            self,
+            bg="#0a1e2c",
+            fg=BRIGHT_CYAN,
+            insertbackground=CYAN,
+            relief="flat",
+            font=("Consolas", 10),
+            state=tk.DISABLED,
+        )
+        self._command_entry.place(relx=0.39, rely=0.88, relwidth=0.42, anchor="center")
+        self._command_entry.bind("<Return>", lambda _event: self._send_command())
+        self._send_button = tk.Button(
+            self,
+            text="SEND",
+            command=self._send_command,
+            bg="#0b4052",
+            activebackground="#16657a",
+            fg=BRIGHT_CYAN,
+            activeforeground="white",
+            relief="flat",
+            bd=0,
+            padx=15,
+            pady=7,
+            cursor="hand2",
+            state=tk.DISABLED,
+            font=("Consolas", 9, "bold"),
+        )
+        self._send_button.place(relx=0.68, rely=0.88, anchor="center")
+
     def _initialize(self) -> None:
-        """Transition from the welcome animation into the live dashboard."""
+        """Activate commands while keeping the animated HUD as the only UI."""
 
-        from karen.text_app import build_application
-
-        from .dashboard import DashboardPage
-
+        project_dir = Path(__file__).resolve().parents[2]
+        llm, router = build_application(project_dir)
+        self._service = ApplicationService(llm, router)
         self._started = True
         self._start_button.configure(
             text="  SYSTEMS ONLINE  ",
             state=tk.DISABLED,
             disabledforeground=GREEN,
         )
-        project_dir = Path(__file__).resolve().parents[2]
-        llm, router = build_application(project_dir)
-        self.withdraw()
-        DashboardPage(self, ApplicationService(llm, router))
+        self._command_entry.configure(state=tk.NORMAL)
+        self._send_button.configure(state=tk.NORMAL)
+        self._command_entry.focus_set()
+        self._last_response = "Local session ready. Ask Karen a question or give a command."
+
+    def _send_command(self) -> None:
+        if self._service is None or self._busy:
+            return
+        text = self._command_entry.get().strip()
+        if not text:
+            return
+        self._command_entry.delete(0, tk.END)
+        self._busy = True
+        self._send_button.configure(state=tk.DISABLED, text="...")
+        self._last_response = "Processing locally..."
+        threading.Thread(target=self._process_command, args=(text,), daemon=True).start()
+
+    def _process_command(self, text: str) -> None:
+        service = self._service
+        if service is not None:
+            response = service.handle_text(text)
+            self._responses.put(response.message)
+
+    def _poll_response(self) -> None:
+        try:
+            response = self._responses.get_nowait()
+        except queue.Empty:
+            self.after(60, self._poll_response)
+            return
+        self._last_response = response
+        self._busy = False
+        self._send_button.configure(state=tk.NORMAL, text="SEND")
+        self._command_entry.focus_set()
+        self.after(60, self._poll_response)
+
+    def _refresh_ollama_status(self) -> None:
+        """Start/check Ollama in the background without freezing the animation."""
+
+        service = self._service
+        if service is not None:
+            def check() -> None:
+                available = service.llm.ensure_available()
+                ready = available and service.llm.has_model()
+                status = (
+                    "QWEN3:4B ONLINE // LOCAL"
+                    if ready
+                    else "OLLAMA ONLINE // INSTALL QWEN3:4B"
+                    if available
+                    else "FAST PATH READY // OLLAMA OFFLINE"
+                )
+                self.after(0, lambda: self._set_model_status(status))
+
+            threading.Thread(target=check, daemon=True).start()
+        self.after(3000, self._refresh_ollama_status)
+
+    def _set_model_status(self, status: str) -> None:
+        self._model_status = status
+        self._draw()
 
     def _animate(self) -> None:
         self._frame += 1
@@ -287,9 +378,17 @@ class OpeningPage(tk.Tk):
         self.canvas.create_text(
             center_x,
             height * 0.68,
-            text="AWAITING YOUR COMMAND" if not self._started else "READY FOR YOUR COMMAND",
+            text="AWAITING YOUR COMMAND" if not self._started else self._last_response[:130],
             fill=GREEN if self._started else CYAN,
             font=subtitle_font,
+            anchor="center",
+        )
+        self.canvas.create_text(
+            center_x,
+            height * 0.73,
+            text=self._model_status,
+            fill=GREEN if "ONLINE" in self._model_status else MUTED,
+            font=label_font,
             anchor="center",
         )
         self.canvas.create_text(

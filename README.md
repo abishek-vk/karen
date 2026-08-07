@@ -25,7 +25,7 @@ Karen/
 │   │   └── system.py       # Read-only OS/time/CPU/RAM information
 │   ├── ai/ollama.py        # Local Ollama HTTP client
 │   ├── text_app.py         # Interactive text application
-│   └── ui/opening.py       # Animated graphical opening page
+│   └── ui/opening.py       # Animated-only graphical interface
 ├── memory/memory.json      # Disabled by default; no conversation storage
 ├── config/settings.json    # Local model configuration (180s CPU-safe timeout)
 ├── requirements.txt
@@ -61,7 +61,7 @@ compatibility wrapper.
    python -m karen
    ```
 
-   To open the animated graphical welcome page:
+   To open the animated-only graphical interface:
 
    ```text
    python -m karen --ui

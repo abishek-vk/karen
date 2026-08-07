@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from karen.skills import app_control, system
+from karen.skills import app_control, system, windows_control
 from karen.skills.base import SkillManifest, SkillResult
 
 from .intent import Intent
@@ -40,7 +40,7 @@ class SkillRegistry:
         return self._skills.get(intent_name)
 
     @classmethod
-    def default(cls) -> "SkillRegistry":
+    def default(cls) -> SkillRegistry:
         """Build the trusted registry shipped with Karen."""
 
         registry = cls()
@@ -74,6 +74,29 @@ class SkillRegistry:
                     risk_level="low",
                 ),
                 lambda intent: _system_result(),
+            )
+        )
+        registry.register(
+            RegisteredSkill(
+                SkillManifest(
+                    name="windows_control",
+                    intents=frozenset(
+                        {
+                            "open_windows_settings",
+                            "open_task_manager",
+                            "open_folder",
+                        }
+                    ),
+                    capabilities=frozenset({"open_allowlisted_windows_destination"}),
+                    risk_level="low",
+                ),
+                lambda intent: (
+                    windows_control.open_windows_settings()
+                    if intent.name == "open_windows_settings"
+                    else windows_control.open_task_manager()
+                    if intent.name == "open_task_manager"
+                    else windows_control.open_folder(intent.target)
+                ),
             )
         )
         registry.register(
