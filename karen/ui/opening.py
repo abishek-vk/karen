@@ -60,6 +60,7 @@ class OpeningPage(tk.Tk):
 
         self._started = False
         self._busy = False
+        self._mode = "idle"
         self._frame = 0
         self._service: ApplicationService | None = None
         self._voice: VoiceService | None = None
@@ -164,6 +165,7 @@ class OpeningPage(tk.Tk):
         llm, router = build_application(project_dir)
         self._service = ApplicationService(llm, router)
         self._started = True
+        self._mode = "ready"
         self._start_button.configure(
             text="  SYSTEMS ONLINE  ",
             state=tk.DISABLED,
@@ -184,6 +186,7 @@ class OpeningPage(tk.Tk):
                 FasterWhisperRecognizer(model_size="tiny.en", record_seconds=4.0)
             )
         self._busy = True
+        self._mode = "listening"
         self._voice_button.configure(state=tk.DISABLED, text="LISTENING...")
         self._send_button.configure(state=tk.DISABLED)
         self._last_response = "Listening locally... speak now."
@@ -205,6 +208,7 @@ class OpeningPage(tk.Tk):
             return
         self._command_entry.delete(0, tk.END)
         self._busy = True
+        self._mode = "processing"
         self._send_button.configure(state=tk.DISABLED, text="...")
         self._last_response = "Processing locally..."
         threading.Thread(target=self._process_command, args=(text,), daemon=True).start()
@@ -223,6 +227,7 @@ class OpeningPage(tk.Tk):
             return
         self._last_response = response
         self._busy = False
+        self._mode = "error" if self._last_response.startswith("Voice unavailable") else "ready"
         self._send_button.configure(state=tk.NORMAL, text="SEND")
         self._voice_button.configure(state=tk.NORMAL, text="MIC / PUSH TO TALK")
         self._command_entry.focus_set()
@@ -267,13 +272,24 @@ class OpeningPage(tk.Tk):
         rotation = elapsed * (0.22 if not self._started else 0.65)
 
         self.canvas.delete("all")
-        self._draw_background(width, height, elapsed)
-        self._draw_particles(center_x, center_y, width, height, elapsed)
-        self._draw_hud(center_x, center_y, pulse, rotation)
-        self._draw_text(width, height, pulse, elapsed)
-        self._draw_status(width, height)
+        mode_color = self._mode_color()
+        self._draw_background(width, height, elapsed, mode_color)
+        self._draw_particles(center_x, center_y, width, height, elapsed, mode_color)
+        self._draw_side_panels(width, height, elapsed, mode_color)
+        self._draw_hud(center_x, center_y, pulse, rotation, mode_color)
+        self._draw_waveform(center_x, height * 0.76, elapsed, mode_color)
+        self._draw_text(width, height, pulse, elapsed, mode_color)
+        self._draw_status(width, height, mode_color)
 
-    def _draw_background(self, width: float, height: float, elapsed: float) -> None:
+    def _mode_color(self) -> str:
+        return {
+            "listening": "#ffe08a",
+            "processing": "#f5c451",
+            "error": "#ff7185",
+            "ready": GREEN,
+        }.get(self._mode, CYAN)
+
+    def _draw_background(self, width: float, height: float, elapsed: float, mode_color: str) -> None:
         for index in range(12):
             margin = index * 38
             color = "#" + format(max(4, 14 - index), "02x") + format(max(10, 25 - index), "02x") + format(max(18, 38 - index), "02x")
@@ -288,6 +304,7 @@ class OpeningPage(tk.Tk):
 
         scan_y = (elapsed * 95) % max(height, 1)
         self.canvas.create_line(0, scan_y, width, scan_y, fill="#0a3443", width=1)
+        self.canvas.create_line(0, scan_y - 1, width, scan_y - 1, fill=mode_color, width=1)
         self.canvas.create_line(0, scan_y + 1, width, scan_y + 1, fill="#061e2b", width=1)
 
     def _draw_particles(
@@ -297,6 +314,7 @@ class OpeningPage(tk.Tk):
         width: float,
         height: float,
         elapsed: float,
+        mode_color: str,
     ) -> None:
         for particle in self._particles:
             angle = particle.angle + elapsed * particle.speed * 80
@@ -304,7 +322,7 @@ class OpeningPage(tk.Tk):
             x = center_x + math.cos(angle) * radius
             y = center_y + math.sin(angle) * radius * 0.56
             if 0 < x < width and 0 < y < height:
-                color = CYAN if particle.alpha_step % 3 else BLUE
+                color = mode_color if particle.alpha_step % 3 else BLUE
                 self.canvas.create_oval(
                     x,
                     y,
@@ -320,13 +338,14 @@ class OpeningPage(tk.Tk):
         center_y: float,
         pulse: float,
         rotation: float,
+        mode_color: str,
     ) -> None:
-        base = 138 + pulse * 8
+        base = 138 + pulse * 8 + (8 if self._mode == "listening" else 0)
         for offset, color, line_width in (
             (30, "#092b3b", 1),
             (18, "#0d536b", 1),
             (7, BLUE, 2),
-            (0, CYAN, 1),
+            (0, mode_color, 1),
         ):
             radius = base + offset
             self.canvas.create_oval(
@@ -339,9 +358,9 @@ class OpeningPage(tk.Tk):
             )
 
         for start, extent, color, width in (
-            (rotation * 55, 92, BRIGHT_CYAN, 3),
+            (rotation * 55, 92, mode_color, 3),
             (rotation * -37 + 120, 44, BLUE, 2),
-            (rotation * 23 + 240, 70, CYAN, 2),
+            (rotation * 23 + 240, 70, mode_color, 2),
         ):
             radius = base + 5
             self.canvas.create_arc(
@@ -363,7 +382,7 @@ class OpeningPage(tk.Tk):
             center_x + inner,
             center_y + inner,
             fill="#061522",
-            outline="#2fb4d1",
+            outline=mode_color,
             width=2,
         )
         self.canvas.create_oval(
@@ -371,8 +390,8 @@ class OpeningPage(tk.Tk):
             center_y - 9 - pulse * 2,
             center_x + 9 + pulse * 2,
             center_y + 9 + pulse * 2,
-            fill=BRIGHT_CYAN,
-            outline=CYAN,
+            fill=mode_color,
+            outline=BRIGHT_CYAN,
         )
 
         for angle in range(0, 360, 30):
@@ -388,7 +407,83 @@ class OpeningPage(tk.Tk):
                 width=2 if angle % 60 == 0 else 1,
             )
 
-    def _draw_text(self, width: float, height: float, pulse: float, elapsed: float) -> None:
+    def _draw_side_panels(
+        self,
+        width: float,
+        height: float,
+        elapsed: float,
+        mode_color: str,
+    ) -> None:
+        """Draw compact telemetry brackets and an animated radar sweep."""
+
+        bracket = 42
+        for x, direction in ((28, 1), (width - 28, -1)):
+            self.canvas.create_line(x, 112, x + direction * bracket, 112, fill=mode_color)
+            self.canvas.create_line(x, 112, x, 152, fill=mode_color)
+            self.canvas.create_line(x, height - 112, x + direction * bracket, height - 112, fill="#174456")
+            self.canvas.create_line(x, height - 112, x, height - 152, fill="#174456")
+
+        self.canvas.create_text(
+            32 if width > 900 else 12,
+            128,
+            text=f"LINK // {self._mode.upper()}",
+            fill=mode_color,
+            font=("Consolas", 8),
+            anchor="w",
+        )
+        self.canvas.create_text(
+            width - 32 if width > 900 else width - 12,
+            128,
+            text="LOCAL / SECURE",
+            fill=MUTED,
+            font=("Consolas", 8),
+            anchor="e",
+        )
+        sweep = (elapsed * 90) % 360
+        radius = min(width, height) * 0.32
+        self.canvas.create_arc(
+            width / 2 - radius,
+            height * 0.46 - radius,
+            width / 2 + radius,
+            height * 0.46 + radius,
+            start=sweep,
+            extent=18,
+            outline=mode_color,
+            width=2,
+            style=tk.ARC,
+        )
+
+    def _draw_waveform(
+        self,
+        center_x: float,
+        y: float,
+        elapsed: float,
+        mode_color: str,
+    ) -> None:
+        """Draw an animated signal strip that reacts to the current mode."""
+
+        active = self._mode in {"listening", "processing"}
+        for index in range(42):
+            x = center_x - 210 + index * 10
+            wave = math.sin(elapsed * (8 if active else 3) + index * 0.7)
+            amplitude = (18 if active else 5) * (0.45 + abs(wave) * 0.55)
+            self.canvas.create_line(
+                x,
+                y - amplitude,
+                x,
+                y + amplitude,
+                fill=mode_color if active else "#15516a",
+                width=2 if index % 4 == 0 else 1,
+            )
+
+    def _draw_text(
+        self,
+        width: float,
+        height: float,
+        pulse: float,
+        elapsed: float,
+        mode_color: str,
+    ) -> None:
         title_font = ("Consolas", 30, "bold")
         subtitle_font = ("Consolas", 10)
         label_font = ("Consolas", 8)
@@ -403,36 +498,20 @@ class OpeningPage(tk.Tk):
                 font=title_font,
                 anchor="center",
             )
-        self.canvas.create_text(
-            center_x,
-            height * 0.18,
-            text="LOCAL INTELLIGENCE // PRIVACY FIRST",
-            fill=MUTED,
-            font=subtitle_font,
-            anchor="center",
-        )
 
-        self.canvas.create_text(
-            center_x,
-            height * 0.46,
-            text="K",
-            fill=BRIGHT_CYAN,
-            font=("Consolas", 34, "bold"),
-            anchor="center",
-        )
         self.canvas.create_text(
             center_x,
             height * 0.68,
             text="AWAITING YOUR COMMAND" if not self._started else self._last_response[:130],
-            fill=GREEN if self._started else CYAN,
+            fill=mode_color if self._started else CYAN,
             font=subtitle_font,
             anchor="center",
         )
         self.canvas.create_text(
             center_x,
             height * 0.73,
-            text=self._model_status,
-            fill=GREEN if "ONLINE" in self._model_status else MUTED,
+            text=f"{self._mode.upper()}  //  {self._model_status}",
+            fill=mode_color if self._started else MUTED,
             font=label_font,
             anchor="center",
         )
@@ -453,7 +532,7 @@ class OpeningPage(tk.Tk):
             anchor="e",
         )
 
-    def _draw_status(self, width: float, height: float) -> None:
+    def _draw_status(self, width: float, height: float, mode_color: str) -> None:
         cpu = "--"
         memory = "--"
         if psutil is not None:
@@ -463,7 +542,7 @@ class OpeningPage(tk.Tk):
             30,
             34,
             text=f"SYSTEM STATUS   CPU {cpu}   RAM {memory}",
-            fill=GREEN,
+            fill=mode_color,
             font=("Consolas", 9),
             anchor="w",
         )
