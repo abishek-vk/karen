@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from dataclasses import dataclass
+from karen.skills.base import SkillResult
 
 
 APPLICATIONS = {
@@ -13,13 +13,6 @@ APPLICATIONS = {
     "chrome": "chrome.exe",
 }
 
-
-@dataclass(frozen=True, slots=True)
-class SkillResult:
-    """Stable result returned by every skill."""
-
-    success: bool
-    message: str
 
 
 def _application_name(target: str | None) -> str | None:

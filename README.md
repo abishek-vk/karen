@@ -11,15 +11,21 @@ Karen/
 ├── main.py                 # Compatibility entry point
 ├── karen/
 │   ├── core/
-│   │   ├── config.py       # Local Ollama settings
-│   │   ├── intent.py       # JSON parsing and validation
-│   │   ├── llm.py          # Ollama-backed LLM boundary and system prompt
-│   │   └── router.py       # Intent-to-skill dispatch
+│   │   ├── config.py       # Compatibility configuration API
+│   │   ├── confirmation.py  # In-memory pending confirmations
+│   │   ├── fast_path.py     # Deterministic common commands
+│   │   ├── intent.py        # JSON parsing and validation
+│   │   ├── llm.py           # Ollama-backed LLM boundary and system prompt
+│   │   ├── permissions.py   # Capability-based policy checks
+│   │   ├── router.py        # Registry-backed intent dispatch
+│   │   └── skill_registry.py # Trusted skill registration
 │   ├── skills/
 │   │   ├── app_control.py  # Notepad, Calculator, Chrome allowlist
+│   │   ├── base.py         # Skill result and manifest contracts
 │   │   └── system.py       # Read-only OS/time/CPU/RAM information
 │   ├── ai/ollama.py        # Local Ollama HTTP client
-│   └── text_app.py         # Interactive text application
+│   ├── text_app.py         # Interactive text application
+│   └── ui/opening.py       # Animated graphical opening page
 ├── memory/memory.json      # Disabled by default; no conversation storage
 ├── config/settings.json    # Local model configuration
 ├── requirements.txt
@@ -49,10 +55,16 @@ compatibility wrapper.
    pip install -r requirements.txt
    ```
 
-5. Start Ollama, then run Karen from the project directory:
+5. Start Ollama, then run Karen's text interface from the project directory:
 
    ```text
    python -m karen
+   ```
+
+   To open the animated graphical welcome page:
+
+   ```text
+   python -m karen --ui
    ```
 
    For compatibility, `python main.py` starts the same text interface.
