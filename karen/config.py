@@ -35,6 +35,9 @@ class Settings:
     privacy_mode: bool = True
     start_with_windows: bool = False
     log_level: str = "INFO"
+    memory_enabled: bool = True
+    recent_message_limit: int = 15
+    max_memory_results: int = 5
 
     @property
     def model(self) -> str:

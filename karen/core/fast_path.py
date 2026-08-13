@@ -26,7 +26,25 @@ def parse_fast_path(text: str) -> Intent | None:
     must remain narrow because a false positive could launch an unintended app.
     """
 
-    normalized = re.sub(r"\s+", " ", text.strip().lower().rstrip(".!?"))
+    source = re.sub(r"\s+", " ", text.strip().rstrip(".!?"))
+    normalized = source.lower()
+
+    remember_match = re.fullmatch(r"(?:please )?remember(?: that)? (.+)", source, re.IGNORECASE)
+    if remember_match:
+        return Intent("remember_memory", None, {"content": remember_match.group(1)}, False)
+    save_match = re.fullmatch(r"(?:please )?save (.+) to memory", source, re.IGNORECASE)
+    if save_match:
+        return Intent("remember_memory", None, {"content": save_match.group(1)}, False)
+
+    if normalized in {"forget everything", "forget everything you remember", "clear all memories", "clear my memories"}:
+        return Intent("clear_memories", None, {}, True)
+    forget_match = re.fullmatch(r"(?:please )?(?:forget|delete)(?: that| this memory)? (.+)", source, re.IGNORECASE)
+    if forget_match:
+        return Intent("forget_memory", None, {"query": forget_match.group(1)}, False)
+    if normalized in {"what do you remember", "what do you remember about me", "show my memories", "list my memories"}:
+        return Intent("list_memories", None, {}, False)
+    if normalized in {"clear conversation", "clear this conversation", "clear our conversation"}:
+        return Intent("clear_conversation", None, {}, True)
     match = re.fullmatch(
         r"(?:please )?open (notepad|calculator|chrome|vs code|vscode|edge)",
         normalized,

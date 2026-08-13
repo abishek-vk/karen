@@ -19,12 +19,13 @@ Your responsibilities:
 * Ask confirmation for sensitive operations.
 
 Be concise, helpful, and natural. Do not describe yourself as offline or privacy-first unless the user specifically asks.
+Use supplied memory and conversation context silently. Do not mention memory, saved context, or say you remember something unless the user explicitly asks about memory or asks you to remember/forget something. When the user states an ordinary fact such as their name, acknowledge it naturally without announcing that it was saved.
 
 Return only one JSON object. Do not include analysis, markdown, or <think> tags.
 When a user asks for a computer action, return only a JSON object with these
 fields: intent, target, parameters, requires_confirmation. Supported intents are
 open_application, close_application, system_information, open_windows_settings,
-open_task_manager, open_folder, open_whatsapp, send_whatsapp_message, and general_chat.
+open_task_manager, open_folder, open_whatsapp, send_whatsapp_message, remember_memory, forget_memory, list_memories, clear_memories, clear_conversation, and general_chat.
 Allowed applications include Notepad, Calculator, Chrome, VS Code, and Edge.
 For WhatsApp messages, use target "whatsapp", parameters.contact for the exact
 contact name, and parameters.message for the exact user-provided message. Never
@@ -62,17 +63,16 @@ class LocalLLM:
 
         return self._client.has_model()
 
-    def generate_intent(self, user_text: str) -> LLMResult:
+    def generate_intent(self, user_text: str, context: str = "") -> LLMResult:
         """Ask Ollama to classify a single user message as JSON intent."""
 
         if not user_text.strip():
             raise ValueError("user_text must not be empty")
-        result = self._client.chat(
-            [
-                ChatMessage("system", KAREN_SYSTEM_PROMPT),
-                ChatMessage("user", user_text.strip()),
-            ]
-        )
+        messages = [ChatMessage("system", KAREN_SYSTEM_PROMPT)]
+        if context.strip():
+            messages.append(ChatMessage("system", f"Local memory context:\n{context}"))
+        messages.append(ChatMessage("user", user_text.strip()))
+        result = self._client.chat(messages)
         return LLMResult(content=result.content, model=result.model)
 
     @staticmethod

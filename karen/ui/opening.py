@@ -18,6 +18,7 @@ from pathlib import Path
 
 from karen.core.application_service import ApplicationService
 from karen.text_app import build_application
+from karen.config import ConfigurationStore
 from karen.voice.contracts import VoiceError
 from karen.voice.recognizer import FasterWhisperRecognizer
 from karen.voice.service import VoiceService
@@ -163,7 +164,15 @@ class OpeningPage(tk.Tk):
 
         project_dir = Path(__file__).resolve().parents[2]
         llm, router = build_application(project_dir)
-        self._service = ApplicationService(llm, router)
+        settings = ConfigurationStore(project_dir / "config").load_settings()
+        self._service = ApplicationService(
+            llm,
+            router,
+            memory_path=project_dir / "data" / "karen.db",
+            memory_enabled=settings.memory_enabled,
+            recent_message_limit=settings.recent_message_limit,
+            max_memory_results=settings.max_memory_results,
+        )
         self._started = True
         self._mode = "ready"
         self._start_button.configure(

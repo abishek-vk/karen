@@ -36,7 +36,7 @@ def process_text(
 ) -> str:
     """Compatibility wrapper around the shared application service."""
 
-    service = ApplicationService(llm, router)
+    service = ApplicationService(llm, router, memory_enabled=False)
     if confirmations is not None:
         service.confirmations = confirmations
     return service.handle_text(text).message
@@ -47,7 +47,16 @@ def main() -> None:
 
     project_dir = Path(__file__).resolve().parent.parent
     llm, router = build_application(project_dir)
-    confirmations = ConfirmationManager()
+    settings = ConfigurationStore(project_dir / "config").load_settings()
+    service = ApplicationService(
+        llm,
+        router,
+        memory_path=project_dir / "data" / "karen.db",
+        memory_enabled=settings.memory_enabled,
+        recent_message_limit=settings.recent_message_limit,
+        max_memory_results=settings.max_memory_results,
+    )
+    confirmations = service.confirmations
     print("Karen: What can I help you with?")
     while True:
         try:
@@ -60,7 +69,7 @@ def main() -> None:
         if user_text.lower() in EXIT_COMMANDS:
             print("Karen: Goodbye.")
             return
-        print(f"Karen: {process_text(user_text, llm, router, confirmations)}")
+        print(f"Karen: {service.handle_text(user_text).message}")
 
 
 if __name__ == "__main__":
