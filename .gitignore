@@ -11,4 +11,5 @@ build/
 /data/*.json
 /data/*.log
 /data/voice/
+/data/whatsapp_profile/
 /data/memory.db

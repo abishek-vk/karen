@@ -40,6 +40,9 @@ def parse_fast_path(text: str) -> Intent | None:
     if normalized in {"show system information", "system information", "system status"}:
         return Intent("system_information", None, {}, False)
 
+    if normalized in {"open whatsapp", "open whatsapp web", "start whatsapp"}:
+        return Intent("open_whatsapp", "whatsapp", {}, False)
+
     if normalized in {"open settings", "open windows settings", "open windows settings app"}:
         return Intent("open_windows_settings", None, {}, False)
 

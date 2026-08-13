@@ -57,6 +57,9 @@ def test_fast_path_handles_common_application_command() -> None:
     assert parse_fast_path("open task manager") == Intent(
         "open_task_manager", None, {}, False
     )
+    assert parse_fast_path("open whatsapp") == Intent(
+        "open_whatsapp", "whatsapp", {}, False
+    )
     assert parse_fast_path("open discord") == Intent(
         "open_application", "discord", {}, False
     )
@@ -117,9 +120,18 @@ def test_permission_policy_requires_confirmation_for_closing() -> None:
 def test_registry_resolves_windows_skills() -> None:
     registry = SkillRegistry.default()
 
+    assert registry.resolve("send_whatsapp_message") is not None
+    assert router_needs_confirmation_for_whatsapp(registry)
     assert registry.resolve("open_windows_settings") is not None
     assert registry.resolve("open_task_manager") is not None
     assert registry.resolve("open_folder") is not None
+
+
+def router_needs_confirmation_for_whatsapp(registry: SkillRegistry) -> bool:
+    registered = registry.resolve("send_whatsapp_message")
+    return registered is not None and IntentRouter(registry).needs_confirmation(
+        Intent("send_whatsapp_message", "whatsapp", {}, False)
+    )
 
 
 def test_registry_rejects_unknown_intent() -> None:

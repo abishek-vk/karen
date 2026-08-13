@@ -8,7 +8,7 @@ from karen.exceptions import LocalAIError
 
 from .confirmation import ConfirmationManager, parse_confirmation
 from .fast_path import parse_fast_path
-from .intent import parse_intent
+from .intent import Intent, parse_intent
 from .llm import LocalLLM
 from .router import IntentRouter
 
@@ -20,6 +20,18 @@ class ServiceResponse:
     message: str
     source: str
     success: bool
+
+
+def _confirmation_prompt(intent: Intent) -> str:
+    if intent.name == "send_whatsapp_message":
+        contact = intent.parameters.get("contact", "the selected contact")
+        message = intent.parameters.get("message", "")
+        return (
+            f"Send this exact message to {contact}?\\n"
+            f'“{message}”\\n'
+            "Say yes to send or no to cancel."
+        )
+    return "This action requires your confirmation. Say yes to continue or no to cancel."
 
 
 class ApplicationService:
@@ -61,7 +73,7 @@ class ApplicationService:
             if self.router.needs_confirmation(intent):
                 self.confirmations.request(intent)
                 return ServiceResponse(
-                    "This action requires your confirmation. Say yes to continue or no to cancel.",
+                    _confirmation_prompt(intent),
                     "confirmation",
                     False,
                 )

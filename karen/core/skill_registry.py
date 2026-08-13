@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from karen.skills import app_control, system, windows_control
+from karen.skills import app_control, system, whatsapp, windows_control
 from karen.skills.base import SkillManifest, SkillResult
 
 from .intent import Intent
@@ -96,6 +96,22 @@ class SkillRegistry:
                     else windows_control.open_task_manager()
                     if intent.name == "open_task_manager"
                     else windows_control.open_folder(intent.target)
+                ),
+            )
+        )
+        registry.register(
+            RegisteredSkill(
+                SkillManifest(
+                    name="whatsapp",
+                    intents=frozenset({"open_whatsapp", "send_whatsapp_message"}),
+                    capabilities=frozenset({"send_external_message"}),
+                    risk_level="high",
+                    requires_confirmation=False,
+                ),
+                lambda intent: (
+                    whatsapp.open_whatsapp()
+                    if intent.name == "open_whatsapp"
+                    else whatsapp.send_message(intent.target, intent.parameters)
                 ),
             )
         )

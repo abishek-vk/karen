@@ -73,7 +73,9 @@ compatibility wrapper.
 
 No cloud API, telemetry, browser history, clipboard, or recording is used.
 Voice support is optional and lazy-loaded. Install it with `pip install -e .[voice]`
-when local microphone input is desired.
+when local microphone input is desired. WhatsApp Web automation is also optional:
+install `pip install -e .[browser]`, then run `playwright install chromium`. Karen
+will open a persistent local browser profile so you can log in to WhatsApp Web.
 Ollama is restricted by the client to a local HTTP endpoint. When the GUI opens,
 Karen attempts to start `ollama serve` automatically; Qwen must already be
 installed locally with `ollama pull qwen3:4b`.

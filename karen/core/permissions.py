@@ -9,7 +9,9 @@ from karen.skills.base import SkillManifest
 from .intent import Intent
 
 
-CONFIRMATION_REQUIRED_INTENTS = frozenset({"close_application"})
+CONFIRMATION_REQUIRED_INTENTS = frozenset(
+    {"close_application", "send_whatsapp_message"}
+)
 
 
 @dataclass(frozen=True, slots=True)

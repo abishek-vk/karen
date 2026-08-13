@@ -16,6 +16,8 @@ SUPPORTED_INTENTS = frozenset(
             "open_windows_settings",
             "open_task_manager",
             "open_folder",
+            "open_whatsapp",
+            "send_whatsapp_message",
             "general_chat",
         }
 )

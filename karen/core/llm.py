@@ -24,8 +24,11 @@ Return only one JSON object. Do not include analysis, markdown, or <think> tags.
 When a user asks for a computer action, return only a JSON object with these
 fields: intent, target, parameters, requires_confirmation. Supported intents are
 open_application, close_application, system_information, open_windows_settings,
-open_task_manager, open_folder, and general_chat. Allowed applications
-include Notepad, Calculator, Chrome, VS Code, and Edge.
+open_task_manager, open_folder, open_whatsapp, send_whatsapp_message, and general_chat.
+Allowed applications include Notepad, Calculator, Chrome, VS Code, and Edge.
+For WhatsApp messages, use target "whatsapp", parameters.contact for the exact
+contact name, and parameters.message for the exact user-provided message. Never
+rewrite or summarize parameters.message.
 For general_chat, include a concise response in parameters.response.
 """
 
