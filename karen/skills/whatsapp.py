@@ -79,9 +79,21 @@ def _get_worker() -> _WhatsAppWorker:
         return _worker
 
 
-def _open_page(context: Any) -> None:
+def _get_whatsapp_page(context: Any) -> Any:
+    """Return the existing WhatsApp tab, preferring it over blank tabs."""
+
+    for page in context.pages:
+        if "web.whatsapp.com" in page.url:
+            page.bring_to_front()
+            return page
     page = context.pages[0] if context.pages else context.new_page()
     page.goto("https://web.whatsapp.com", wait_until="domcontentloaded")
+    page.bring_to_front()
+    return page
+
+
+def _open_page(context: Any) -> None:
+    _get_whatsapp_page(context)
 
 
 def open_whatsapp() -> SkillResult:
@@ -125,9 +137,8 @@ def _first_visible(page: Any, selectors: tuple[str, ...], timeout: int = 30_000)
 
 
 def _send_on_page(context: Any, contact: str, message: str) -> None:
-    page = context.pages[0] if context.pages else context.new_page()
-    page.goto("https://web.whatsapp.com", wait_until="domcontentloaded")
-    page.wait_for_timeout(2_000)
+    page = _get_whatsapp_page(context)
+    page.wait_for_timeout(500)
     if page.get_by_text("Use WhatsApp on your computer", exact=False).count() > 0:
         raise WhatsAppAutomationError("WhatsApp is not logged in. Scan the QR code first.")
 
@@ -143,13 +154,49 @@ def _send_on_page(context: Any, contact: str, message: str) -> None:
     search.fill(contact)
     page.wait_for_timeout(1_500)
 
-    result = page.get_by_text(contact, exact=True).first
-    try:
-        result.wait_for(state="visible", timeout=8_000)
-    except Exception:
-        result = page.locator(f'[title="{contact}"]').first
-        result.wait_for(state="visible", timeout=5_000)
-    result.click()
+    normalized_contact = " ".join(contact.strip().lower().split())
+    rows = page.locator(
+        '[role="listitem"], [data-testid="cell-frame-container"]'
+    )
+    matching_rows = []
+    for index in range(min(rows.count(), 100)):
+        candidate = rows.nth(index)
+        if not candidate.is_visible():
+            continue
+        lines = [line.strip() for line in candidate.inner_text().splitlines() if line.strip()]
+        if lines and " ".join(lines[0].lower().split()) == normalized_contact:
+            matching_rows.append(candidate)
+    if len(matching_rows) != 1:
+        title_result = page.locator(f'[title="{contact}"]').first
+        if title_result.is_visible():
+            matching_rows.append(title_result)
+    if len(matching_rows) != 1:
+        raise WhatsAppAutomationError(
+            f"I couldn't uniquely identify {contact}. No message was sent."
+        )
+    matching_rows[0].click()
+
+    normalized_contact = " ".join(contact.strip().lower().split())
+    header_candidates = page.locator(
+        'header span[title], header span[dir="auto"], '
+        '[data-testid="conversation-info-header-chat-title"]'
+    )
+    actual_contact = ""
+    for index in range(min(header_candidates.count(), 20)):
+        candidate = header_candidates.nth(index)
+        if not candidate.is_visible():
+            continue
+        value = candidate.get_attribute("title") or candidate.inner_text()
+        normalized_value = " ".join(value.strip().lower().split())
+        if normalized_value in {"profile details", "search", "menu", "video call", "voice call"}:
+            continue
+        actual_contact = value
+        if normalized_value == normalized_contact:
+            break
+    if " ".join(actual_contact.strip().lower().split()) != normalized_contact:
+        raise WhatsAppAutomationError(
+            f"Safety check failed: WhatsApp opened {actual_contact!r}, not {contact!r}. No message was sent."
+        )
 
     composer = _first_visible(
         page,
@@ -171,6 +218,13 @@ def _send_on_page(context: Any, contact: str, message: str) -> None:
         timeout=10_000,
     )
     send_button.click()
+    sent_message = page.get_by_text(message, exact=True).last
+    try:
+        sent_message.wait_for(state="visible", timeout=10_000)
+    except Exception as error:
+        raise WhatsAppAutomationError(
+            "WhatsApp did not verify the exact message after sending."
+        ) from error
 
 
 def send_message(intent_target: str | None, parameters: dict[str, Any]) -> SkillResult:
