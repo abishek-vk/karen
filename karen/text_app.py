@@ -55,6 +55,8 @@ def main() -> None:
         memory_enabled=settings.memory_enabled,
         recent_message_limit=settings.recent_message_limit,
         max_memory_results=settings.max_memory_results,
+        live_information_enabled=settings.live_information_enabled,
+        live_information_timeout_seconds=settings.live_information_timeout_seconds,
     )
     confirmations = service.confirmations
     print("Karen: What can I help you with?")

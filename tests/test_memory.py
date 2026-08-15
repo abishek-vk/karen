@@ -6,6 +6,7 @@ from karen.core.intent import Intent
 from karen.core.router import IntentRouter
 from karen.memory.database import MemoryDatabase
 from karen.memory.service import MemoryService
+from karen.web.current_info import CurrentInfoService
 
 
 def test_database_initializes_and_persists_schema(tmp_path: Path) -> None:
@@ -110,6 +111,38 @@ def test_memory_survives_new_service_session(tmp_path: Path) -> None:
     first.record_message("user", "I am building an AI assistant called Karen.")
     second = MemoryService(path)
     assert "Karen" in second.context_for("What project am I building?")
+
+
+def test_current_information_returns_live_search_results(monkeypatch) -> None:
+    html = (
+        '<a class="result__a" href="https://example.test/current">Current answer</a>'
+        '<div class="result__snippet">The current office holder is Vijay.</div>'
+    )
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return None
+        def read(self):
+            return html.encode()
+
+    monkeypatch.setattr("karen.web.current_info.urlopen", lambda request, timeout: Response())
+    result = CurrentInfoService().handle_intent(
+        Intent("current_information", None, {"query": "Who is the current CM of Tamil Nadu?"}, False)
+    )
+    assert result.success is True
+    assert "Vijay" in result.message
+    assert "example.test" in result.message
+
+
+def test_current_question_fast_path_is_separate_from_model_memory() -> None:
+    intent = parse_fast_path("Who is the current CM of Tamil Nadu?")
+    assert intent == Intent(
+        "current_information",
+        None,
+        {"query": "Who is the current CM of Tamil Nadu"},
+        False,
+    )
 
 
 def test_clear_memory_command_requires_existing_confirmation_flow(tmp_path: Path) -> None:

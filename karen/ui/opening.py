@@ -172,6 +172,8 @@ class OpeningPage(tk.Tk):
             memory_enabled=settings.memory_enabled,
             recent_message_limit=settings.recent_message_limit,
             max_memory_results=settings.max_memory_results,
+            live_information_enabled=settings.live_information_enabled,
+            live_information_timeout_seconds=settings.live_information_timeout_seconds,
         )
         self._started = True
         self._mode = "ready"

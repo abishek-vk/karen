@@ -55,6 +55,12 @@ def parse_fast_path(text: str) -> Intent | None:
     if normalized in {"what time is it", "tell me the time", "current time"}:
         return Intent("system_information", None, {}, False)
 
+    if (
+        any(marker in normalized for marker in ("current", "latest", "today", "now", "present", "as of now"))
+        and any(word in normalized for word in ("who", "what", "which", "where", "when", "how"))
+    ):
+        return Intent("current_information", None, {"query": source}, False)
+
     if normalized in {"show system information", "system information", "system status"}:
         return Intent("system_information", None, {}, False)
 

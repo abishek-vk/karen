@@ -8,6 +8,7 @@ from pathlib import Path
 from karen.exceptions import LocalAIError
 from karen.memory import MemoryService
 from karen.skills.base import SkillManifest
+from karen.web import CurrentInfoService
 
 from .confirmation import ConfirmationManager, parse_confirmation
 from .fast_path import parse_fast_path
@@ -51,16 +52,35 @@ class ApplicationService:
         recent_message_limit: int = 15,
         max_memory_results: int = 5,
         memory: MemoryService | None = None,
+        live_information: CurrentInfoService | None = None,
+        live_information_enabled: bool = True,
+        live_information_timeout_seconds: float = 8.0,
     ) -> None:
         self.llm = llm
         self.router = router
         self.confirmations = ConfirmationManager()
+        self.live_information = live_information or CurrentInfoService(
+            enabled=live_information_enabled,
+            timeout_seconds=live_information_timeout_seconds,
+        )
         self.memory = memory or MemoryService(
             memory_path,
             enabled=memory_enabled,
             recent_message_limit=recent_message_limit,
             max_memory_results=max_memory_results,
         )
+        if self.router.registry.resolve("current_information") is None:
+            self.router.registry.register(
+                RegisteredSkill(
+                    SkillManifest(
+                        name="current_information",
+                        intents=frozenset({"current_information"}),
+                        capabilities=frozenset({"live_information_lookup"}),
+                        risk_level="low",
+                    ),
+                    self.live_information.handle_intent,
+                )
+            )
         if self.router.registry.resolve("remember_memory") is None:
             self.router.registry.register(
                 RegisteredSkill(

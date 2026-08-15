@@ -24,6 +24,7 @@ SUPPORTED_INTENTS = frozenset(
         "list_memories",
         "clear_memories",
         "clear_conversation",
+        "current_information",
     }
 )
 

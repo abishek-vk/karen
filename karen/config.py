@@ -38,6 +38,8 @@ class Settings:
     memory_enabled: bool = True
     recent_message_limit: int = 15
     max_memory_results: int = 5
+    live_information_enabled: bool = True
+    live_information_timeout_seconds: float = 8.0
 
     @property
     def model(self) -> str:
