@@ -60,6 +60,8 @@ class OpeningPage(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
         self._started = False
+        self._fullscreen = True
+        self.attributes("-fullscreen", True)
         self._busy = False
         self._mode = "idle"
         self._frame = 0
@@ -89,6 +91,7 @@ class OpeningPage(tk.Tk):
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda _event: self._draw())
         self.bind("<Escape>", lambda _event: self.destroy())
+        self.bind("<F11>", lambda _event: self._toggle_fullscreen())
 
         self._build_controls()
         self.after(40, self._animate)
@@ -158,6 +161,11 @@ class OpeningPage(tk.Tk):
             font=("Consolas", 8, "bold"),
         )
         self._voice_button.place(relx=0.84, rely=0.88, anchor="center")
+
+    def _toggle_fullscreen(self) -> None:
+        self._fullscreen = not self._fullscreen
+        self.attributes("-fullscreen", self._fullscreen)
+        self._draw()
 
     def _initialize(self) -> None:
         """Activate commands while keeping the animated HUD as the only UI."""
