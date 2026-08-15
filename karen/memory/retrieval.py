@@ -15,11 +15,15 @@ _STOP_WORDS = frozenset(
 def keywords(text: str) -> list[str]:
     """Extract useful, bounded search terms from a user request."""
 
-    return [
+    lowered = text.lower()
+    words = [
         word
-        for word in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9+#.-]{2,}", text.lower())
+        for word in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9+#.-]{2,}", lowered)
         if word not in _STOP_WORDS
-    ][:8]
+    ]
+    if re.search(r"\b(?:who am i|what(?:'s| is) my name|tell me my name)\b", lowered):
+        words.insert(0, "name")
+    return list(dict.fromkeys(words))[:8]
 
 
 def retrieve_relevant(

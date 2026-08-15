@@ -90,6 +90,18 @@ def test_name_is_promoted_to_long_term_memory(tmp_path: Path) -> None:
     service = MemoryService(tmp_path / "karen.db")
     service.record_message("user", "My name is Karen.")
     assert "Karen" in service.context_for("What is my name?")
+    assert service.forget("my name") == 1
+    assert service.list_memories() == []
+
+
+def test_corrected_name_replaces_old_identity(tmp_path: Path) -> None:
+    service = MemoryService(tmp_path / "karen.db")
+    service.record_message("user", "My name is Karen.")
+    service.record_message("user", "My name is Abi.")
+    memories = service.list_memories()
+    assert len(memories) == 1
+    assert memories[0].category == "identity"
+    assert memories[0].content == "My name is Abi"
 
 
 def test_memory_survives_new_service_session(tmp_path: Path) -> None:

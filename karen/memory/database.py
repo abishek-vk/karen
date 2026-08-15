@@ -184,6 +184,21 @@ class MemoryDatabase:
             ).fetchone()
         return LongTermMemory(**dict(result))
 
+    def delete_messages_matching_all(self, patterns: Iterable[str]) -> int:
+        values = [pattern for pattern in patterns if pattern]
+        if not values:
+            return 0
+        clauses = " AND ".join("lower(content) LIKE ?" for _ in values)
+        arguments = [f"%{value.lower()}%" for value in values]
+        with self._connect() as connection:
+            cursor = connection.execute(f"DELETE FROM messages WHERE {clauses}", arguments)
+            return cursor.rowcount
+
+    def delete_memories_by_category(self, category: str) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM memories WHERE category = ?", (category,))
+            return cursor.rowcount
+
     def delete_memories_matching(self, patterns: Iterable[str]) -> int:
         values = [pattern for pattern in patterns if pattern]
         if not values:

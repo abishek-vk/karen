@@ -116,6 +116,8 @@ class MemoryService:
     @staticmethod
     def _category(content: str) -> str:
         lowered = content.lower()
+        if re.match(r"my name is ", lowered):
+            return "identity"
         if "prefer" in lowered or "favorite" in lowered or "favourite" in lowered:
             return "preference"
         if "project" in lowered or "building" in lowered or "called" in lowered:
@@ -129,9 +131,13 @@ class MemoryService:
         database = self.database
         if not self.available or database is None:
             return None
+        memory_category = category or self._category(clean)
+        if memory_category == "identity":
+            # Identity is singular: a corrected name replaces the old one.
+            self._run(lambda: database.delete_memories_by_category("identity"), 0)
         return self._run(
             lambda: database.add_or_update_memory(
-                category or self._category(clean), clean, 1, self._now()
+                memory_category, clean, 1, self._now()
             ),
             None,
         )
@@ -146,7 +152,11 @@ class MemoryService:
         database = self.database
         if not self.available or database is None:
             return 0
-        return self._run(lambda: database.delete_memories_matching(terms or [clean]), 0)
+        deleted = self._run(lambda: database.delete_memories_matching(terms or [clean]), 0)
+        # Prevent a forgotten fact from being reintroduced through recent
+        # conversation context on the next question.
+        self._run(lambda: database.delete_messages_matching_all(terms or [clean]), 0)
+        return deleted
 
     def list_memories(self) -> list[LongTermMemory]:
         database = self.database
