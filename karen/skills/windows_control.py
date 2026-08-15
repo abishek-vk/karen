@@ -9,10 +9,19 @@ from pathlib import Path
 from .base import SkillResult
 
 
+HOME = Path.home()
 FOLDERS = {
-    "desktop": Path.home() / "Desktop",
-    "documents": Path.home() / "Documents",
-    "downloads": Path.home() / "Downloads",
+    "home": HOME,
+    "user folder": HOME,
+    "desktop": HOME / "Desktop",
+    "documents": HOME / "Documents",
+    "downloads": HOME / "Downloads",
+    "pictures": HOME / "Pictures",
+    "photos": HOME / "Pictures",
+    "videos": HOME / "Videos",
+    "music": HOME / "Music",
+    "3d objects": HOME / "3D Objects",
+    "favorites": HOME / "Favorites",
 }
 
 
@@ -43,10 +52,13 @@ def open_task_manager() -> SkillResult:
 def open_folder(target: str | None) -> SkillResult:
     """Open one of the user's standard folders, never an arbitrary path."""
 
-    name = target.strip().lower() if target else ""
+    name = " ".join(target.strip().lower().split()) if target else ""
     folder = FOLDERS.get(name)
     if folder is None:
-        return SkillResult(False, "I can only open Desktop, Documents, or Downloads.")
+        return SkillResult(
+            False,
+            "I can open Home, Desktop, Documents, Downloads, Pictures, Videos, or Music.",
+        )
     if os.name != "nt":
         return SkillResult(False, "Windows controls are available on Windows only.")
     if not folder.exists():

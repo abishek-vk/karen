@@ -18,6 +18,7 @@ from pathlib import Path
 
 from karen.core.application_service import ApplicationService
 from karen.text_app import build_application
+from karen.config import ConfigurationStore
 from karen.voice.contracts import VoiceError
 from karen.voice.recognizer import FasterWhisperRecognizer
 from karen.voice.service import VoiceService
@@ -59,6 +60,8 @@ class OpeningPage(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
         self._started = False
+        self._fullscreen = True
+        self.attributes("-fullscreen", True)
         self._busy = False
         self._mode = "idle"
         self._frame = 0
@@ -88,6 +91,7 @@ class OpeningPage(tk.Tk):
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda _event: self._draw())
         self.bind("<Escape>", lambda _event: self.destroy())
+        self.bind("<F11>", lambda _event: self._toggle_fullscreen())
 
         self._build_controls()
         self.after(40, self._animate)
@@ -158,12 +162,27 @@ class OpeningPage(tk.Tk):
         )
         self._voice_button.place(relx=0.84, rely=0.88, anchor="center")
 
+    def _toggle_fullscreen(self) -> None:
+        self._fullscreen = not self._fullscreen
+        self.attributes("-fullscreen", self._fullscreen)
+        self._draw()
+
     def _initialize(self) -> None:
         """Activate commands while keeping the animated HUD as the only UI."""
 
         project_dir = Path(__file__).resolve().parents[2]
         llm, router = build_application(project_dir)
-        self._service = ApplicationService(llm, router)
+        settings = ConfigurationStore(project_dir / "config").load_settings()
+        self._service = ApplicationService(
+            llm,
+            router,
+            memory_path=project_dir / "data" / "karen.db",
+            memory_enabled=settings.memory_enabled,
+            recent_message_limit=settings.recent_message_limit,
+            max_memory_results=settings.max_memory_results,
+            live_information_enabled=settings.live_information_enabled,
+            live_information_timeout_seconds=settings.live_information_timeout_seconds,
+        )
         self._started = True
         self._mode = "ready"
         self._start_button.configure(

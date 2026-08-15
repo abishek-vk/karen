@@ -21,6 +21,8 @@ APPLICATIONS = {
     "opera": "launcher.exe",
     "vs code": "code.exe",
     "vscode": "code.exe",
+    "file explorer": "explorer.exe",
+    "explorer": "explorer.exe",
 }
 
 BROWSER_ALIASES = {
@@ -104,6 +106,17 @@ def _launch_catalog_entry(name: str) -> SkillResult:
     discovered = catalog.get(name)
     if discovered is None:
         discovered = catalog.get(BROWSER_ALIASES.get(name, ""))
+    if discovered is None:
+        # Apps can be installed after Karen starts, so refresh once before
+        # falling back to PATH or reporting that the application is missing.
+        catalog = refresh_application_catalog()
+        discovered = catalog.get(name) or catalog.get(BROWSER_ALIASES.get(name, ""))
+    if discovered is None and catalog:
+        # Built-in aliases such as "vs code" may resolve to an executable
+        # that is not on PATH. Prefer a high-confidence Start Menu shortcut.
+        close_match = difflib.get_close_matches(name, catalog, n=1, cutoff=0.55)
+        if close_match:
+            discovered = catalog[close_match[0]]
     if discovered is not None:
         try:
             os.startfile(str(discovered.launch_path))  # type: ignore[attr-defined]

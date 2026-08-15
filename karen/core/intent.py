@@ -10,16 +10,22 @@ from typing import Any
 
 SUPPORTED_INTENTS = frozenset(
     {
-            "open_application",
-            "close_application",
-            "system_information",
-            "open_windows_settings",
-            "open_task_manager",
-            "open_folder",
-            "open_whatsapp",
-            "send_whatsapp_message",
-            "general_chat",
-        }
+        "open_application",
+        "close_application",
+        "system_information",
+        "open_windows_settings",
+        "open_task_manager",
+        "open_folder",
+        "open_whatsapp",
+        "send_whatsapp_message",
+        "general_chat",
+        "remember_memory",
+        "forget_memory",
+        "list_memories",
+        "clear_memories",
+        "clear_conversation",
+        "current_information",
+    }
 )
 
 
