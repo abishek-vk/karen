@@ -7,6 +7,8 @@ from karen.core.fast_path import parse_fast_path
 from karen.core.intent import Intent, parse_intent
 from karen.core.router import IntentRouter
 from karen.core.skill_registry import RegisteredSkill, SkillRegistry
+from karen.skills import app_control
+from karen.skills.app_control import CatalogEntry
 from karen.skills.base import SkillManifest, SkillResult
 from karen.text_app import process_text
 from karen.core.llm import LocalLLM
@@ -48,6 +50,21 @@ def test_router_blocks_confirmation_before_skill(monkeypatch) -> None:
     assert result.success is False
     assert called is False
     assert "confirmation" in result.message
+
+
+def test_vs_code_uses_a_matching_start_menu_shortcut(monkeypatch, tmp_path) -> None:
+    shortcut = tmp_path / "Visual Studio Code.lnk"
+    shortcut.touch()
+    catalog = {"visual studio code": CatalogEntry("visual studio code", shortcut, True)}
+    monkeypatch.setattr(app_control, "_catalog", catalog)
+    monkeypatch.setattr(app_control, "refresh_application_catalog", lambda: catalog)
+    opened: list[str] = []
+    monkeypatch.setattr(app_control.os, "startfile", lambda path: opened.append(path), raising=False)
+
+    result = app_control._launch_catalog_entry("vs code")
+
+    assert result.success is True
+    assert opened == [str(shortcut)]
 
 
 def test_fast_path_handles_common_application_command() -> None:
