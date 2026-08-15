@@ -55,27 +55,45 @@ class CurrentInfoService:
         return self._search_bing(query, limit)
 
     def _search_current_office_holder(self, query: str) -> list[SearchResult]:
+        lowered = query.lower()
         match = re.search(
             r"(?:current|present|latest|now).*?(?:cm|chief minister) of ([a-z][a-z ]+)",
-            query.lower(),
+            lowered,
         )
-        if not match:
+        possessive_match = re.search(
+            r"([a-z][a-z ]+?)(?:'s|s')\s+(?:current|present|latest|now).*?(?:cm|chief minister)",
+            lowered,
+        )
+        if match:
+            state = " ".join(match.group(1).split()).strip(" ?.!\"")
+        elif possessive_match:
+            state = " ".join(possessive_match.group(1).split()).strip(" ?.!\"")
+        else:
             return []
-        state = " ".join(match.group(1).split()).strip(" ?.!\")")
+        state = re.sub(r"^(?:who is|what is|tell me)\s+", "", state).strip()
+        state = {"tamilnadu": "Tamil Nadu", "tamil nad": "Tamil Nadu"}.get(state, state)
         page = "Chief_Minister_of_" + "_".join(word.title() for word in state.split())
-        url = (
+        urls = (
             "https://en.wikipedia.org/w/api.php?action=parse&prop=wikitext&format=json&page="
-            + quote_plus(page)
+            + quote_plus(page),
+            "https://en.wikipedia.org/w/api.php?action=parse&prop=wikitext&format=json&formatversion=2&page="
+            + quote_plus(page),
         )
-        request = Request(url, headers={"User-Agent": "KarenAI/1.0 current-information"})
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                payload = json.loads(response.read().decode("utf-8", errors="replace"))
-            wikitext = payload["parse"]["wikitext"]["*"]
-            incumbent = re.search(r"incumbent\s*=\s*\[\[([^\]]+)\]\]", wikitext, re.IGNORECASE)
-        except (HTTPError, URLError, OSError, TimeoutError, KeyError, TypeError, json.JSONDecodeError) as error:
-            LOGGER.warning("Authoritative current-information lookup failed: %s", error)
+        wikitext = ""
+        for url in urls:
+            request = Request(url, headers={"User-Agent": "KarenAI/1.0 current-information"})
+            try:
+                with urlopen(request, timeout=self.timeout_seconds) as response:
+                    payload = json.loads(response.read().decode("utf-8", errors="replace"))
+                value = payload.get("parse", {}).get("wikitext", "")
+                wikitext = value.get("*") if isinstance(value, dict) else value
+                if isinstance(wikitext, str) and wikitext:
+                    break
+            except (HTTPError, URLError, OSError, TimeoutError, KeyError, TypeError, json.JSONDecodeError) as error:
+                LOGGER.warning("Authoritative current-information lookup failed: %s", error)
+        if not isinstance(wikitext, str) or not wikitext:
             return []
+        incumbent = re.search(r"incumbent\s*=\s*\[\[([^\]]+)\]\]", wikitext, re.IGNORECASE)
         if incumbent is None:
             return []
         person = incumbent.group(1).strip()
