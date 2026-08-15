@@ -67,7 +67,10 @@ def parse_fast_path(text: str) -> Intent | None:
     if normalized in {"open task manager", "start task manager"}:
         return Intent("open_task_manager", None, {}, False)
 
-    folder_match = re.fullmatch(r"(?:please )?open (desktop|documents|downloads)", normalized)
+    folder_match = re.fullmatch(
+        r"(?:please )?open (home|user folder|desktop|documents|downloads|pictures|photos|videos|music|3d objects|favorites)",
+        normalized,
+    )
     if folder_match:
         return Intent("open_folder", folder_match.group(1), {}, False)
 

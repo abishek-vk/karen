@@ -21,6 +21,8 @@ APPLICATIONS = {
     "opera": "launcher.exe",
     "vs code": "code.exe",
     "vscode": "code.exe",
+    "file explorer": "explorer.exe",
+    "explorer": "explorer.exe",
 }
 
 BROWSER_ALIASES = {
