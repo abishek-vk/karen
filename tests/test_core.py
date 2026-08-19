@@ -67,6 +67,15 @@ def test_vs_code_uses_a_matching_start_menu_shortcut(monkeypatch, tmp_path) -> N
     assert opened == [str(shortcut)]
 
 
+def test_fast_path_handles_simple_greetings_without_model() -> None:
+    assert parse_fast_path("Hi") == Intent(
+        "general_chat", None, {"response": "Hi! How can I help?"}, False
+    )
+    assert parse_fast_path("Thanks Karen") == Intent(
+        "general_chat", None, {"response": "You're welcome!"}, False
+    )
+
+
 def test_fast_path_handles_common_application_command() -> None:
     assert parse_fast_path("Please open Notepad!") == Intent(
         "open_application", "notepad", {}, False
