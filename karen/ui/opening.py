@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import queue
 import random
+import textwrap
 import threading
 import time
 import tkinter as tk
@@ -519,10 +520,27 @@ class OpeningPage(tk.Tk):
             )
 
 
+        response_text = "AWAITING YOUR COMMAND"
+        if self._started:
+            character_width = max(42, int(width / 10))
+            wrapped_lines: list[str] = []
+            for paragraph in self._last_response.splitlines() or [self._last_response]:
+                wrapped_lines.extend(textwrap.wrap(
+                    paragraph,
+                    width=character_width,
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                ) or [""])
+            if len(wrapped_lines) > 5:
+                wrapped_lines = wrapped_lines[:5]
+                wrapped_lines[-1] = wrapped_lines[-1].rstrip(" .") + "..."
+            response_text = "\n".join(wrapped_lines)
         self.canvas.create_text(
             center_x,
             height * 0.68,
-            text="AWAITING YOUR COMMAND" if not self._started else self._last_response[:130],
+            text=response_text,
+            width=width * 0.78,
+            justify="center",
             fill=mode_color if self._started else CYAN,
             font=subtitle_font,
             anchor="center",

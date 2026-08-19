@@ -9,7 +9,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 from urllib.request import Request, urlopen
 
 from karen.core.intent import Intent
@@ -38,6 +38,9 @@ class CurrentInfoService:
         authoritative = self._search_current_office_holder(query)
         if authoritative:
             return authoritative[:limit]
+        cricket = self._search_current_cricket_captain(query)
+        if cricket:
+            return cricket[:limit]
         url = "https://html.duckduckgo.com/html/?q=" + quote_plus(query.strip())
         request = Request(
             url,
@@ -49,10 +52,50 @@ class CurrentInfoService:
         except (HTTPError, URLError, OSError, TimeoutError) as error:
             LOGGER.warning("Live information lookup failed: %s", error)
             document = ""
-        results = self._parse_results(document, limit)
-        if results:
-            return results
-        return self._search_bing(query, limit)
+        results = self._parse_results(document, 8)
+        results.extend(self._search_bing(query, 8))
+        return self._rank_results(query, results, limit)
+
+    def _search_current_cricket_captain(self, query: str) -> list[SearchResult]:
+        lowered = query.lower()
+        if not (
+            "captain" in lowered
+            and ("cricket" in lowered or "team" in lowered)
+            and ("india" in lowered or "indian" in lowered)
+        ):
+            return []
+        page = "India_national_cricket_team"
+        url = (
+            "https://en.wikipedia.org/w/api.php?action=parse&prop=wikitext&format=json&page="
+            + quote_plus(page)
+        )
+        request = Request(url, headers={"User-Agent": "KarenAI/1.0 current-information"})
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8", errors="replace"))
+            wikitext = payload["parse"]["wikitext"]["*"]
+        except (HTTPError, URLError, OSError, TimeoutError, KeyError, TypeError, json.JSONDecodeError) as error:
+            LOGGER.warning("Cricket captain lookup failed: %s", error)
+            return []
+        captains: list[str] = []
+        for format_name in ("test", "od", "t20i"):
+            match = re.search(
+                rf"{format_name}_captain\s*=\s*\[\[([^\]]+)\]\]",
+                wikitext,
+                re.IGNORECASE,
+            )
+            if match:
+                label = "ODI" if format_name == "od" else format_name.upper()
+                captains.append(f"{label}: {match.group(1).strip()}")
+        if not captains:
+            return []
+        return [
+            SearchResult(
+                "Current India cricket team captains",
+                "; ".join(captains) + ".",
+                "https://en.wikipedia.org/wiki/India_national_cricket_team",
+            )
+        ]
 
     def _search_current_office_holder(self, query: str) -> list[SearchResult]:
         lowered = query.lower()
@@ -104,6 +147,38 @@ class CurrentInfoService:
                 f"https://en.wikipedia.org/wiki/{page}",
             )
         ]
+
+    @staticmethod
+    def _rank_results(query: str, results: list[SearchResult], limit: int) -> list[SearchResult]:
+        terms = [term for term in re.findall(r"[a-z0-9]+", query.lower()) if len(term) > 2]
+        trusted_weights = {
+            ".gov": 5,
+            "gov.in": 5,
+            "wikipedia.org": 4,
+            "bbc.com": 4,
+            "thehindu.com": 4,
+            "reuters.com": 4,
+        }
+        unique: dict[str, SearchResult] = {}
+        for result in results:
+            if result.url and result.url not in unique:
+                unique[result.url] = result
+        scored: list[tuple[int, SearchResult]] = []
+        for result in unique.values():
+            searchable = f"{result.title} {result.snippet}".lower()
+            if "captain" in query.lower() and (
+                "captain" not in searchable
+                or not any(term in searchable for term in ("india", "indian", "cricket"))
+            ):
+                continue
+            score = sum(2 for term in terms if term in result.title.lower())
+            score += sum(1 for term in terms if term in searchable)
+            host = urlparse(result.url).netloc.lower()
+            score += max((weight for domain, weight in trusted_weights.items() if domain in host), default=0)
+            if score:
+                scored.append((score, result))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [result for _score, result in scored[:limit]]
 
     def _search_bing(self, query: str, limit: int) -> list[SearchResult]:
         url = "https://www.bing.com/search?format=rss&q=" + quote_plus(query.strip())

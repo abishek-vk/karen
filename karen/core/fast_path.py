@@ -52,6 +52,18 @@ def parse_fast_path(text: str) -> Intent | None:
     if match:
         return Intent("open_application", _APPLICATION_COMMANDS[match.group(1)], {}, False)
 
+    if normalized in {"hi", "hello", "hey", "hi karen", "hello karen", "hey karen"}:
+        return Intent(
+            "general_chat",
+            None,
+            {"response": "Hi! How can I help?"},
+            False,
+        )
+    if normalized in {"thanks", "thank you", "thanks karen", "thank you karen"}:
+        return Intent("general_chat", None, {"response": "You're welcome!"}, False)
+    if normalized in {"good morning", "good afternoon", "good evening"}:
+        return Intent("general_chat", None, {"response": "Hello! How can I help?"}, False)
+
     if normalized in {"what time is it", "tell me the time", "current time"}:
         return Intent("system_information", None, {}, False)
 
