@@ -18,6 +18,10 @@ from .contracts import VoiceError
 LOGGER = logging.getLogger(__name__)
 
 _BLOCK_SECONDS = 0.03
+# Speech must be this loud (RMS) and 4x the room's noise. Built-in mic arrays with
+# noise suppression sit near 0.0002 in silence, so a fixed 0.012 missed quiet voices.
+_MIN_THRESHOLD = 0.003
+_MAX_GAIN = 30.0
 # Whisper tends to "hear" these phrases in silence or noise.
 _HALLUCINATIONS = frozenset({
     "", "you", "thank you", "thanks for watching", "thank you for watching", "bye", "okay",
@@ -108,9 +112,10 @@ class FasterWhisperRecognizer:
         preroll: deque[Any] = deque(maxlen=10)  # ~300 ms before speech begins
         captured: list[Any] = []
         noise: list[float] = []
-        threshold = 0.015
+        threshold = _MIN_THRESHOLD
         loud_run = 0
         quiet_run = 0
+        zero_blocks = 0
         speaking = False
         try:
             with sd.InputStream(samplerate=self.sample_rate, channels=1, dtype="float32", blocksize=block) as stream:
@@ -120,11 +125,13 @@ class FasterWhisperRecognizer:
                     data, _overflowed = stream.read(block)
                     samples = data[:, 0].copy()
                     level = float(np.sqrt(np.mean(samples * samples)))
+                    # A live mic always has faint hiss; exact digital zeros mean it is muted upstream.
+                    zero_blocks += bool(np.count_nonzero(samples) < len(samples) // 10)
                     self.level = min(1.0, level * 12.0)
                     if index < 8:
                         # Calibrate to the room's background noise first.
                         noise.append(level)
-                        threshold = max(0.012, float(np.median(noise)) * 3.0)
+                        threshold = max(_MIN_THRESHOLD, float(np.median(noise)) * 4.0)
                     if not speaking:
                         preroll.append(samples)
                         loud_run = loud_run + 1 if level > threshold else 0
@@ -132,6 +139,11 @@ class FasterWhisperRecognizer:
                             speaking = True
                             captured.extend(preroll)
                         elif index >= start_blocks:
+                            if zero_blocks > index * 0.8:
+                                raise VoiceError(
+                                    "Your microphone is sending pure silence. It is probably muted: check the "
+                                    "mic-mute key on your keyboard, or Settings > System > Sound > Input."
+                                )
                             raise VoiceError("I didn't hear anything.")
                         continue
                     captured.append(samples)
@@ -146,7 +158,10 @@ class FasterWhisperRecognizer:
             self.level = 0.0
         if not captured:
             raise VoiceError("I didn't hear anything.")
-        return np.concatenate(captured)
+        audio = np.concatenate(captured)
+        # Laptop mic arrays can be very quiet; bring speech up to a normal level.
+        peak = float(np.max(np.abs(audio))) or 1.0
+        return audio * min(_MAX_GAIN, 0.9 / peak)
 
     def transcribe_once(self) -> str:
         audio = self._record()
@@ -154,8 +169,9 @@ class FasterWhisperRecognizer:
             segments, _info = self._load_model().transcribe(
                 audio,
                 language=self.language,
-                beam_size=1,
-                best_of=1,
+                # Beam search plus the vocabulary prompt is what gets names like
+                # "Shanju" right ("Sean due" with greedy decoding) for ~0.1 s more.
+                beam_size=5,
                 temperature=0.0,
                 initial_prompt=self.initial_prompt,
                 condition_on_previous_text=False,

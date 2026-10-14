@@ -24,7 +24,7 @@
   "whisper_model": "base.en",
   "whisper_threads": 0,
   "listen_max_seconds": 12,
-  "listen_silence_seconds": 0.8,
+  "listen_silence_seconds": 1.0,
   "wake_word_enabled": false,
   "wake_word_model": "hey_jarvis",
   "wake_word_threshold": 0.5

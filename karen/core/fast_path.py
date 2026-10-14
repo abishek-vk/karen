@@ -141,10 +141,18 @@ def parse_fast_path(text: str) -> Intent | None:
         if pattern.fullmatch(command):
             return Intent("system_control", action, {}, False)
 
-    youtube = re.fullmatch(r"(?:play|search(?: for)?|find) (.+?) on youtube|search youtube for (.+)|youtube (.+)", command)
+    youtube = re.fullmatch(r"(?:search(?: for)?|find) (.+?) (?:on|in) youtube|search youtube for (.+)|youtube (.+)", command)
     if youtube:
         query = next(group for group in youtube.groups() if group)
         return Intent("open_website", "youtube", {"query": query}, False)
+    # "play shape of you (on youtube)": open the top video so it actually plays.
+    play = re.fullmatch(r"play (?:the )?(?:song |video |music )?(.+?)(?: song| video)?(?: (?:on|in) youtube)?", command)
+    if play:
+        return Intent("open_website", "youtube", {"query": play.group(1), "play": True}, False)
+
+    whatsapp = _whatsapp_message(source)
+    if whatsapp is not None:
+        return whatsapp
 
     if command in {"open whatsapp", "open whatsapp web", "start whatsapp", "launch whatsapp"}:
         return Intent("open_whatsapp", "whatsapp", {}, False)
@@ -185,6 +193,43 @@ def is_follow_up(text: str) -> bool:
     """Does this refer back to the conversation ("that team", "he", "they")?"""
 
     return bool(_FOLLOW_UP.search(_command_form(clean_utterance(text))))
+
+
+_CONTACT = r"(?P<contact>[^\W\d_][\w.'-]*(?: [^\W\d_][\w.'-]*){0,3}?)"
+_WHATSAPP_MESSAGE = (
+    # "send a (whatsapp) message to Shanju saying I'll be late"
+    re.compile(
+        rf"(?:please )?(?:send|drop|write)(?: an?)?(?: whatsapp| quick)?(?: message| msg| text)? to {_CONTACT}"
+        rf"(?: on whatsapp)?\s*(?:saying|that says|telling (?:him|her|them)(?: that)?|that|with)\s*:?\s+(?P<message>.+)",
+        re.IGNORECASE,
+    ),
+    # "whatsapp Shanju that I'll be late" / "message Shanju saying hi"
+    re.compile(
+        rf"(?:whatsapp|message|msg|text) {_CONTACT}(?: on whatsapp)?\s*(?:saying|that|:)\s*(?P<message>.+)",
+        re.IGNORECASE,
+    ),
+    # "tell Shanju on whatsapp (that) I'll be late"
+    re.compile(rf"tell {_CONTACT} (?:on|via|through) whatsapp(?: that)?\s+(?P<message>.+)", re.IGNORECASE),
+    # "send 'I'll be late' to Shanju on whatsapp"
+    re.compile(rf"send [\"'“]?(?P<message>.+?)[\"'”]? to {_CONTACT} (?:on|via|through) whatsapp", re.IGNORECASE),
+)
+
+
+def _whatsapp_message(source: str) -> Intent | None:
+    """A WhatsApp message for a named contact, keeping the user's exact words."""
+
+    for pattern in _WHATSAPP_MESSAGE:
+        match = pattern.fullmatch(source.strip())
+        if match is None:
+            continue
+        contact = match.group("contact").strip()
+        message = match.group("message").strip().strip("\"'“”").strip()
+        if not contact or not message or contact.lower() in {"me", "myself", "him", "her", "them", "it"}:
+            return None
+        if contact.islower():
+            contact = " ".join(word.capitalize() for word in contact.split())
+        return Intent("send_whatsapp_message", "whatsapp", {"contact": contact, "message": message}, True)
+    return None
 
 
 def needs_live_information(text: str) -> bool:

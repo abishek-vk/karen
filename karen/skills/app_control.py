@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from karen.skills import focus
 from karen.skills.base import SkillResult
 
 
@@ -134,11 +135,14 @@ def _launch_catalog_entry(name: str) -> SkillResult:
         # before falling back to PATH or reporting that the app is missing.
         catalog = refresh_application_catalog()
         discovered = catalog.get(name) or catalog.get(alias)
+    hints = [name, alias]
+    before = focus.snapshot()
     if discovered is not None:
         try:
             os.startfile(str(discovered.launch_path))  # type: ignore[attr-defined]
         except OSError:
             return SkillResult(False, f"I couldn't open {name.title()}.")
+        focus.bring_to_front(before, [*hints, discovered.name, discovered.launch_path.stem])
         return SkillResult(True, f"Opening {name.title()}.")
 
     executable = APPLICATIONS.get(name)
@@ -151,6 +155,7 @@ def _launch_catalog_entry(name: str) -> SkillResult:
         subprocess.Popen([executable], shell=False, close_fds=True)
     except OSError:
         return SkillResult(False, f"I couldn't open {name.title()}.")
+    focus.bring_to_front(before, [*hints, Path(executable).stem])
     return SkillResult(True, f"Opening {name.title()}.")
 
 

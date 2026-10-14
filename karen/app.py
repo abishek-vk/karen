@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -20,6 +21,7 @@ from .voice.recognizer import FasterWhisperRecognizer
 from .voice.speaker import SpeechOutput
 from .voice.tts import build_text_to_speech
 from .voice.wakeword import WakeWordListener
+from .skills import whatsapp
 from .web import CurrentInfoService
 
 LOGGER = logging.getLogger(__name__)
@@ -113,7 +115,23 @@ class KarenRuntime:
                 silence_seconds=self.settings.listen_silence_seconds,
                 cpu_threads=self.settings.whisper_threads,
             )
+        # Refreshed on every use so newly remembered names are recognised at once.
+        self._recognizer.initial_prompt = self.voice_vocabulary()
         return self._recognizer
+
+    def voice_vocabulary(self) -> str:
+        """Names the speech model should expect; without them "Shanju" comes out as "Sean due"."""
+
+        words = [self.settings.assistant_name, "WhatsApp", "Notepad", "Calculator", "YouTube", "Chrome", "VS Code"]
+        name = self.memory.user_name()
+        if name:
+            words.append(name)
+        for memory in self.memory.list_memories(50):
+            # Names follow "is" in facts like "my best friend is Shanju".
+            match = re.search(r"\bis ([a-z][\w'-]*(?: [a-z][\w'-]*)?)$", memory.content, re.IGNORECASE)
+            if match and memory.category in {"people", "identity", "fact"}:
+                words.append(" ".join(part.capitalize() for part in match.group(1).split()))
+        return ", ".join(dict.fromkeys(words)) + "."
 
     def start_wake_word(self, on_detect: Callable[[], None], on_error: Callable[[str], None] | None = None) -> None:
         if self.wake_word is None:
@@ -142,6 +160,7 @@ class KarenRuntime:
         if self._recognizer is not None:
             self._recognizer.cancel()
         self.speaker.close()
+        whatsapp.shutdown()
         self.llm.shutdown()
 
 

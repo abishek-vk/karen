@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from pathlib import Path
 from typing import Any, Callable
 
+from . import focus
 from .base import SkillResult
+
+LOGGER = logging.getLogger(__name__)
 
 
 _PROFILE_DIR = Path(__file__).resolve().parents[2] / "data" / "whatsapp_profile"
@@ -21,7 +25,7 @@ class _WhatsAppWorker:
     """Own Playwright objects on one thread to satisfy Playwright thread affinity."""
 
     def __init__(self) -> None:
-        self._requests: queue.Queue[tuple[Callable[[Any], Any], threading.Event, dict[str, Any]]] = queue.Queue()
+        self._requests: queue.Queue[tuple[Callable[[Any], Any], threading.Event, dict[str, Any]] | None] = queue.Queue()
         self._started = threading.Event()
         self._startup_error: Exception | None = None
         self._thread = threading.Thread(target=self._run, name="karen-whatsapp", daemon=True)
@@ -38,14 +42,36 @@ class _WhatsAppWorker:
             profile_dir = _PROFILE_DIR
             profile_dir.mkdir(parents=True, exist_ok=True)
             playwright = sync_playwright().start()
-            context = playwright.chromium.launch_persistent_context(
-                str(profile_dir),
-                headless=False,
-                args=["--disable-notifications"],
-            )
+            context = None
+            # Prefer the browser Windows already has (Edge, then Chrome) so no
+            # separate Chromium download is needed; fall back to Playwright's own.
+            for channel in ("msedge", "chrome", None):
+                try:
+                    context = playwright.chromium.launch_persistent_context(
+                        str(profile_dir),
+                        channel=channel,
+                        headless=False,
+                        no_viewport=True,
+                        args=["--disable-notifications", "--start-maximized"],
+                    )
+                    break
+                except Exception as error:  # pragma: no cover - browser dependent
+                    LOGGER.info("WhatsApp browser %s unavailable: %s", channel or "chromium", error)
+            if context is None:
+                raise WhatsAppAutomationError(
+                    "No browser is available for WhatsApp Web. Install Microsoft Edge or run: playwright install chromium"
+                )
             self._started.set()
             while True:
-                operation, finished, result = self._requests.get()
+                request = self._requests.get()
+                if request is None:
+                    # Close properly so WhatsApp's login (kept in browser storage) is saved.
+                    try:
+                        context.close()
+                    finally:
+                        playwright.stop()
+                    return
+                operation, finished, result = request
                 try:
                     result["value"] = operation(context)
                 except Exception as error:  # pragma: no cover - browser dependent
@@ -71,6 +97,10 @@ class _WhatsAppWorker:
             raise result["error"]
         return result.get("value")
 
+    def close(self, timeout: float = 15.0) -> None:
+        self._requests.put(None)
+        self._thread.join(timeout)
+
 
 _worker: _WhatsAppWorker | None = None
 _worker_lock = threading.Lock()
@@ -84,35 +114,77 @@ def _get_worker() -> _WhatsAppWorker:
         return _worker
 
 
-def _get_whatsapp_page(context: Any) -> Any:
-    """Return the existing WhatsApp tab, preferring it over blank tabs."""
+def shutdown() -> None:
+    """Close the WhatsApp browser cleanly (called when Karen exits)."""
 
-    for page in context.pages:
-        if "web.whatsapp.com" in page.url:
-            page.bring_to_front()
-            return page
-    page = context.pages[0] if context.pages else context.new_page()
-    page.goto("https://web.whatsapp.com", wait_until="domcontentloaded")
+    global _worker
+    with _worker_lock:
+        worker, _worker = _worker, None
+    if worker is not None:
+        try:
+            worker.close()
+        except Exception:  # pragma: no cover - best effort on exit
+            LOGGER.debug("WhatsApp browser did not close cleanly", exc_info=True)
+
+
+def _run(operation: Callable[[Any], Any]) -> Any:
+    """Run on the WhatsApp browser, relaunching it once if the user closed its window."""
+
+    global _worker
+    try:
+        return _get_worker().execute(operation)
+    except Exception as error:
+        if "closed" not in str(error).lower():
+            raise
+        with _worker_lock:
+            _worker = None
+        return _get_worker().execute(operation)
+
+
+def _get_whatsapp_page(context: Any) -> Any:
+    """Reuse the one WhatsApp tab (closing stray blank tabs) and show it."""
+
+    pages = list(context.pages)
+    page = next((candidate for candidate in pages if "web.whatsapp.com" in candidate.url), None)
+    if page is None:
+        page = next((candidate for candidate in pages if candidate.url in {"about:blank", "edge://newtab/", "chrome://newtab/"}), None)
+        page = page or context.new_page()
+        page.goto("https://web.whatsapp.com", wait_until="domcontentloaded")
+    for other in pages:
+        if other is not page and other.url in {"about:blank", "edge://newtab/", "chrome://newtab/"}:
+            other.close()
     page.bring_to_front()
+    # Raise the browser window itself over Karen's fullscreen interface.
+    focus.bring_to_front(set(), ["WhatsApp"], grace=0)
     return page
 
 
-def _open_page(context: Any) -> None:
-    _get_whatsapp_page(context)
+def _open_page(context: Any) -> bool:
+    """Show WhatsApp; return True when logged in, False when the QR code is showing."""
+
+    page = _get_whatsapp_page(context)
+    try:
+        page.locator("#pane-side, canvas").first.wait_for(state="visible", timeout=20_000)
+    except Exception:
+        return True  # Still loading; nothing more to report.
+    return page.locator("#pane-side").count() > 0
 
 
 def open_whatsapp() -> SkillResult:
     """Open WhatsApp Web using one persistent local browser session."""
 
     try:
-        _get_worker().execute(_open_page)
+        logged_in = _run(_open_page)
     except WhatsAppAutomationError as error:
         return SkillResult(False, str(error))
     except Exception as error:  # pragma: no cover - browser dependent
         return SkillResult(False, f"I couldn't open WhatsApp Web: {error}")
+    if logged_in:
+        return SkillResult(True, "Opening WhatsApp.")
     return SkillResult(
         True,
-        "Opening WhatsApp Web. Log in once; Karen will reuse this local session.",
+        "WhatsApp needs a one-time login: on your phone open WhatsApp, Linked devices, and scan the code. "
+        "I'll keep you logged in after that.",
     )
 
 
@@ -157,51 +229,23 @@ def _send_on_page(context: Any, contact: str, message: str) -> None:
         ),
     )
     search.fill(contact)
-    page.wait_for_timeout(1_500)
+    page.wait_for_timeout(1_800)
 
-    normalized_contact = " ".join(contact.strip().lower().split())
-    rows = page.locator(
-        '[role="listitem"], [data-testid="cell-frame-container"]'
-    )
-    matching_rows = []
-    for index in range(min(rows.count(), 100)):
-        candidate = rows.nth(index)
-        if not candidate.is_visible():
-            continue
-        lines = [line.strip() for line in candidate.inner_text().splitlines() if line.strip()]
-        if lines and " ".join(lines[0].lower().split()) == normalized_contact:
-            matching_rows.append(candidate)
-    if len(matching_rows) != 1:
-        escaped_contact = contact.replace("\\", "\\\\").replace('"', '\\"')
-        title_result = page.locator(f'[title="{escaped_contact}"]').first
-        if title_result.is_visible():
-            matching_rows.append(title_result)
-    if len(matching_rows) != 1:
-        raise WhatsAppAutomationError(
-            f"I couldn't uniquely identify {contact}. No message was sent."
-        )
-    matching_rows[0].click()
+    resolved = _resolve_contact(page, contact)
+    page.locator(f'#pane-side span[title="{_css_string(resolved)}"]').first.click()
 
-    normalized_contact = " ".join(contact.strip().lower().split())
-    header_candidates = page.locator(
-        'header span[title], header span[dir="auto"], '
-        '[data-testid="conversation-info-header-chat-title"]'
-    )
-    actual_contact = ""
-    for index in range(min(header_candidates.count(), 20)):
-        candidate = header_candidates.nth(index)
-        if not candidate.is_visible():
-            continue
-        value = candidate.get_attribute("title") or candidate.inner_text()
-        normalized_value = " ".join(value.strip().lower().split())
-        if normalized_value in {"profile details", "search", "menu", "video call", "voice call"}:
-            continue
-        actual_contact = value
-        if normalized_value == normalized_contact:
-            break
-    if " ".join(actual_contact.strip().lower().split()) != normalized_contact:
+    # Safety: only type into the chat whose header shows the resolved contact.
+    header = page.locator('#main header span[title], #main header span[dir="auto"]')
+    opened = ""
+    for index in range(min(header.count(), 10)):
+        candidate = header.nth(index)
+        if candidate.is_visible():
+            opened = (candidate.get_attribute("title") or candidate.inner_text()).strip()
+            if _normalize(opened) == _normalize(resolved):
+                break
+    if _normalize(opened) != _normalize(resolved):
         raise WhatsAppAutomationError(
-            f"Safety check failed: WhatsApp opened {actual_contact!r}, not {contact!r}. No message was sent."
+            f"Safety check failed: WhatsApp opened {opened!r}, not {resolved!r}. No message was sent."
         )
 
     composer = _first_visible(
@@ -235,6 +279,45 @@ def _send_on_page(context: Any, contact: str, message: str) -> None:
         ) from error
 
 
+def _normalize(value: str) -> str:
+    return " ".join(value.strip().lower().split())
+
+
+def _css_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _resolve_contact(page: Any, contact: str) -> str:
+    """Pick the one chat the spoken name refers to, or explain why not.
+
+    "Shanju" matches a chat named "Shanju" exactly, or else a single chat whose
+    name starts with those words ("Shanju K"). Several candidates are never guessed.
+    """
+
+    names: list[str] = []
+    titles = page.locator("#pane-side span[title]")
+    for index in range(min(titles.count(), 60)):
+        title = titles.nth(index)
+        if title.is_visible():
+            name = (title.get_attribute("title") or "").strip()
+            if name and name not in names:
+                names.append(name)
+    wanted = _normalize(contact)
+    exact = [name for name in names if _normalize(name) == wanted]
+    if len(exact) == 1:
+        return exact[0]
+    words = wanted.split()
+    starts = [name for name in names if _normalize(name).split()[: len(words)] == words]
+    if len(starts) == 1:
+        return starts[0]
+    if not exact and not starts:
+        raise WhatsAppAutomationError(f"I couldn't find a WhatsApp chat named {contact}. No message was sent.")
+    options = ", ".join((exact or starts)[:4])
+    raise WhatsAppAutomationError(
+        f"More than one chat matches {contact}: {options}. Say the full name. No message was sent."
+    )
+
+
 def send_message(intent_target: str | None, parameters: dict[str, Any]) -> SkillResult:
     """Send one exact message after the router has confirmed the intent."""
 
@@ -245,7 +328,7 @@ def send_message(intent_target: str | None, parameters: dict[str, Any]) -> Skill
         return SkillResult(False, "This action is only registered for WhatsApp.")
 
     try:
-        _get_worker().execute(lambda context: _send_on_page(context, contact, message))
+        _run(lambda context: _send_on_page(context, contact, message))
     except Exception as error:  # pragma: no cover - browser/runtime dependent
         return SkillResult(False, f"WhatsApp could not send the message: {error}")
-    return SkillResult(True, f"Message sent to {contact}.")
+    return SkillResult(True, f"Message sent to {contact} on WhatsApp.")

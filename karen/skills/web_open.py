@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import webbrowser
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
+from urllib.request import Request, urlopen
 
+from . import focus
 from .base import SkillResult
+
+LOGGER = logging.getLogger(__name__)
 
 WEBSITES = {
     "youtube": "https://www.youtube.com",
@@ -66,8 +71,17 @@ def open_website(target: str | None, parameters: dict | None = None) -> SkillRes
     site = resolve_website(target)
     if site is None:
         return SkillResult(False, "I don't know that website. Try saying its address, like github dot com.")
-    query = (parameters or {}).get("query")
-    if isinstance(query, str) and query.strip() and site in _SEARCH_URLS:
+    parameters = parameters or {}
+    query = parameters.get("query")
+    video = (
+        first_youtube_video(query.strip())
+        if site == "youtube" and parameters.get("play") and isinstance(query, str) and query.strip()
+        else None
+    )
+    if video is not None:
+        url = video
+        message = f"Playing {query.strip()} on YouTube."
+    elif isinstance(query, str) and query.strip() and site in _SEARCH_URLS:
         url = _SEARCH_URLS[site].format(quote_plus(query.strip()))
         message = f"Searching {site.title()} for {query.strip()}."
     elif site in WEBSITES:
@@ -76,9 +90,32 @@ def open_website(target: str | None, parameters: dict | None = None) -> SkillRes
     else:
         url = site if site.startswith("http") else f"https://{site}"
         message = f"Opening {site}."
+    before = focus.snapshot()
     try:
         if not webbrowser.open(url, new=2):
             return SkillResult(False, "I couldn't open your web browser.")
     except webbrowser.Error:
         return SkillResult(False, "I couldn't open your web browser.")
+    # The page usually opens as a tab in an existing browser window, whose title
+    # then names the site ("... - YouTube"); raise that window over Karen.
+    host = (urlparse(url).hostname or "").removeprefix("www.").split(".")[0]
+    focus.bring_to_front(before, [site.split(".")[0], host])
     return SkillResult(True, message)
+
+
+def first_youtube_video(query: str, timeout: float = 5.0) -> str | None:
+    """URL of the top YouTube result for ``query`` so "play X" starts playing X."""
+
+    request = Request(
+        "https://www.youtube.com/results?search_query=" + quote_plus(query),
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0", "Accept-Language": "en"},
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            page = response.read(1_500_000).decode("utf-8", errors="replace")
+    except OSError as error:
+        LOGGER.info("YouTube lookup failed: %s", error)
+        return None
+    # The first "videoRenderer" is the top organic result (ads use other renderers).
+    match = re.search(r'"videoRenderer":\{"videoId":"([\w-]{11})"', page)
+    return f"https://www.youtube.com/watch?v={match.group(1)}" if match else None
