@@ -22,7 +22,7 @@ _ABBREVIATIONS = re.compile(r"(?:\b(?:mr|mrs|ms|dr|st|vs|etc|e\.g|i\.e|no|jr|sr|
 _URL = re.compile(r"https?://\S+|www\.\S+")
 
 
-def clean_for_speech(text: str) -> str:
+def clean_for_speech(text: str, pronunciations: dict[str, str] | None = None) -> str:
     """Turn display text into something pleasant to hear."""
 
     lines = []
@@ -38,14 +38,23 @@ def clean_for_speech(text: str) -> str:
     spoken = re.sub(r"[*_`#>|]", "", spoken)
     spoken = spoken.replace("°C", " degrees Celsius").replace("°F", " degrees Fahrenheit")
     spoken = spoken.replace("km/h", "kilometres per hour").replace("&", " and ")
+    for written, said in (pronunciations or {}).items():
+        # Whole words only, any case: "Abi" -> "Abby" but "Abigail" stays.
+        spoken = re.sub(rf"\b{re.escape(written)}\b", said, spoken, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", spoken).strip()
 
 
 class SpeechOutput:
     """Queue sentences for a single TTS worker thread."""
 
-    def __init__(self, engine: TextToSpeech | None, on_state: Callable[[bool], None] | None = None) -> None:
+    def __init__(
+        self,
+        engine: TextToSpeech | None,
+        on_state: Callable[[bool], None] | None = None,
+        pronunciations: dict[str, str] | None = None,
+    ) -> None:
         self.engine = engine
+        self.pronunciations = dict(pronunciations or {})
         self.on_state = on_state
         self.enabled = engine is not None
         self._queue: queue.Queue[tuple[int, str] | None] = queue.Queue()
@@ -123,7 +132,7 @@ class SpeechOutput:
                 self._enqueue(remainder)
 
     def _enqueue(self, text: str) -> None:
-        spoken = clean_for_speech(text)
+        spoken = clean_for_speech(text, self.pronunciations)
         if spoken and self.enabled:
             self._idle.clear()
             self._start()

@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import tempfile
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +68,8 @@ class Settings:
     tts_rate: int = 1  # SAPI speaking rate from -10 to 10.
     piper_executable: str = "piper"
     piper_model_path: str = ""
+    # How to say words the voice gets wrong (display text is unchanged), e.g. {"Abi": "Abby"}.
+    pronunciations: dict[str, str] = field(default_factory=dict)
 
     # Voice input
     whisper_model: str = "base.en"

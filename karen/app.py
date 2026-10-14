@@ -83,6 +83,7 @@ class KarenRuntime:
                 piper_model_path=settings.piper_model_path,
             ),
             on_state=on_speech_state,
+            pronunciations=settings.pronunciations,
         )
         self.speaker.enabled = self.speaker.available and self.preferences.speak_responses
         self._recognizer: FasterWhisperRecognizer | None = None

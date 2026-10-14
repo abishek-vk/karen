@@ -20,6 +20,7 @@
   "tts_engine": "sapi",
   "tts_voice": "",
   "tts_rate": 1,
+  "pronunciations": {"Abi": "Abby"},
   "whisper_model": "base.en",
   "whisper_threads": 0,
   "listen_max_seconds": 12,
