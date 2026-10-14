@@ -5,21 +5,24 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "karen-ai"
 version = "0.1.0"
-description = "Privacy-first offline Windows AI companion"
+description = "Privacy-first, voice-first local Windows AI assistant"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["psutil>=5.9", "comtypes>=1.4; sys_platform == 'win32'"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 voice = [
     "faster-whisper>=1.0",
     "numpy>=1.26",
-    "openwakeword>=0.6",
-    "piper-tts>=1.2",
     "sounddevice>=0.4",
-    "speechbrain>=1.0",
 ]
+wakeword = ["openwakeword>=0.6", "numpy>=1.26", "sounddevice>=0.4"]
+web = ["ddgs>=9.0"]
+piper = ["piper-tts>=1.2"]
 browser = ["playwright>=1.45"]
+
+[project.scripts]
+karen = "karen.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

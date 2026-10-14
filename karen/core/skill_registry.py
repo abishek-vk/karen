@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from karen.skills import app_control, system, whatsapp, windows_control
+from karen.skills import app_control, system, system_control, web_open, whatsapp, windows_control
 from karen.skills.base import SkillManifest, SkillResult
 
 from .intent import Intent
@@ -50,11 +50,8 @@ class SkillRegistry:
                     name="app_control",
                     intents=frozenset({"open_application", "close_application"}),
                     capabilities=frozenset(
-                                            {
-                                                "launch_allowlisted_application",
-                                                "close_allowlisted_application",
-                                            }
-                                        ),
+                        {"launch_allowlisted_application", "close_allowlisted_application"}
+                    ),
                     risk_level="medium",
                     requires_confirmation=False,
                 ),
@@ -73,7 +70,7 @@ class SkillRegistry:
                     capabilities=frozenset({"read_system_information"}),
                     risk_level="low",
                 ),
-                lambda intent: _system_result(),
+                lambda intent: _system_result(intent.target),
             )
         )
         registry.register(
@@ -97,6 +94,28 @@ class SkillRegistry:
                     if intent.name == "open_task_manager"
                     else windows_control.open_folder(intent.target)
                 ),
+            )
+        )
+        registry.register(
+            RegisteredSkill(
+                SkillManifest(
+                    name="system_control",
+                    intents=frozenset({"system_control"}),
+                    capabilities=frozenset({"press_media_keys", "lock_workstation"}),
+                    risk_level="low",
+                ),
+                lambda intent: system_control.control(intent.target),
+            )
+        )
+        registry.register(
+            RegisteredSkill(
+                SkillManifest(
+                    name="web_open",
+                    intents=frozenset({"open_website"}),
+                    capabilities=frozenset({"open_url_in_default_browser"}),
+                    risk_level="low",
+                ),
+                lambda intent: web_open.open_website(intent.target, intent.parameters),
             )
         )
         registry.register(
@@ -129,8 +148,8 @@ class SkillRegistry:
         return registry
 
 
-def _system_result() -> SkillResult:
-    result = system.get_system_information()
+def _system_result(topic: str | None = None) -> SkillResult:
+    result = system.get_system_information(topic)
     return SkillResult(result.success, result.message)
 
 

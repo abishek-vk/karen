@@ -6,21 +6,45 @@ import logging
 import re
 import sqlite3
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeVar
 
 from karen.core.intent import Intent
 from karen.skills.base import SkillResult
 
 from .database import MemoryDatabase
 from .models import LongTermMemory
-from .retrieval import format_context, retrieve_relevant
+from .retrieval import STOP_WORDS, format_context, retrieve_memories
 
 LOGGER = logging.getLogger(__name__)
+T = TypeVar("T")
+
+# Up to three words, stopping before "and", "but" or punctuation.
+_NAME = r"[a-z][a-z.'-]*(?: (?!and\b|but\b|from\b|i\b)[a-z][a-z.'-]*){0,2}"
+# User statements that are safe to promote to long-term memory automatically.
+_FACT_PATTERNS: tuple[tuple[str, str], ...] = (
+    (rf"my name is (?P<v>{_NAME})", "identity"),
+    (rf"(?:call me|you can call me|i am called|i'm called) (?P<v>{_NAME})", "identity"),
+    (r"my (?:favorite|favourite|preferred) .+ (?:is|are) .+", "preference"),
+    (r"i (?:really )?(?:like|love|enjoy|prefer|hate|dislike) .+", "preference"),
+    (r"i(?:'m| am) allergic to .+", "fact"),
+    (r"i (?:live|stay) in .+", "fact"),
+    (r"i(?:'m| am) from .+", "fact"),
+    (r"my birthday is .+", "fact"),
+    (r"i was born (?:on|in) .+", "fact"),
+    (r"i (?:work|study) (?:at|in|for|as) .+", "fact"),
+    (r"my (?:wife|husband|partner|mom|mother|dad|father|brother|sister|son|daughter|friend|boss|"
+     r"girlfriend|boyfriend|dog|cat)(?:'s name)? is .+", "people"),
+    (r"this project is called .+", "project"),
+    (r"i(?:'m| am) (?:building|working on|developing) .+", "project"),
+)
+_PRONOUN_QUERIES = frozenset({"", "it", "that", "this"})
 
 
 class MemoryService:
-    """Persist conversations and explicit long-term memories locally.
+    """Persist conversations and long-term memories locally.
 
     Database errors are intentionally contained here. Memory is an enhancement,
     so a locked, unavailable, or corrupt database must not stop Karen's other
@@ -33,8 +57,9 @@ class MemoryService:
         *,
         enabled: bool = True,
         session_id: str | None = None,
-        recent_message_limit: int = 15,
+        recent_message_limit: int = 6,
         max_memory_results: int = 5,
+        max_stored_messages: int = 2000,
     ) -> None:
         self.enabled = enabled and path is not None
         self.session_id = session_id or str(uuid.uuid4())
@@ -45,6 +70,7 @@ class MemoryService:
             try:
                 self.database = MemoryDatabase(Path(path))
                 self.database.create_conversation(self.session_id, self._now())
+                self.database.prune_messages(max_stored_messages)
             except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
                 self._disable(error)
 
@@ -61,66 +87,77 @@ class MemoryService:
         self.database = None
         self.enabled = False
 
-    def _run(self, operation, default):
-        if not self.available:
+    def _run(self, operation: Callable[[MemoryDatabase], T], default: T) -> T:
+        database = self.database
+        if not self.available or database is None:
             return default
         try:
-            return operation()
+            return operation(database)
         except (OSError, RuntimeError, ValueError, TypeError, sqlite3.Error):
             LOGGER.exception("Karen memory operation failed")
             return default
 
+    # -- conversation -----------------------------------------------------
+
     def record_message(self, role: str, content: str) -> None:
         if role not in {"user", "assistant"} or not content.strip():
             return
-        database = self.database
-        if not self.available or database is None:
-            return
         clean = content.strip()
-        self._run(
-            lambda: database.add_message(self.session_id, role, clean, self._now()),
-            None,
-        )
+        self._run(lambda db: db.add_message(self.session_id, role, clean, self._now()), None)
         if role == "user":
             self._extract_safe_fact(clean)
 
+    def recent_turns(self) -> list[tuple[str, str]]:
+        """Return the latest ``(role, content)`` turns of this session, oldest first."""
+
+        if self.recent_message_limit <= 0:
+            return []
+        messages = self._run(lambda db: db.recent_messages(self.session_id, self.recent_message_limit), [])
+        return [(message.role, message.content) for message in messages]
+
     def _extract_safe_fact(self, content: str) -> None:
         """Promote only narrowly recognizable, user-stated facts."""
-        if re.match(r"(?:please )?(?:remember|save)", content, re.IGNORECASE):
+
+        if re.match(r"(?:please )?(?:remember|save|note)\b", content, re.IGNORECASE):
             return
-        fact_patterns = (
-            r"my name is .+",
-            r"my (?:favorite|preferred) .+ is .+",
-            r"this project is called .+",
-            r"i(?:'m| am) building .+",
-        )
-        if any(re.fullmatch(pattern, content.strip().rstrip(".!?"), re.IGNORECASE) for pattern in fact_patterns):
-            self.remember(content)
+        sentence = content.strip().rstrip(".!?")
+        for pattern, category in _FACT_PATTERNS:
+            if category == "identity":
+                match = re.match(pattern + r"(?=$|[ ,.;!]|\s+(?:and|but)\b)", sentence, re.IGNORECASE)
+            else:
+                match = re.fullmatch(pattern, sentence, re.IGNORECASE)
+            if not match:
+                continue
+            if category == "identity":
+                name = " ".join(word.capitalize() if word.islower() else word for word in match.group("v").split())
+                self.remember(f"My name is {name}", category="identity")
+            else:
+                self.remember(sentence, category=category)
+            return
 
     def context_for(self, query: str) -> str:
-        database = self.database
-        if not self.available or database is None:
-            return ""
-        memories, messages = self._run(
-            lambda: retrieve_relevant(
-                database,
-                query,
-                self.session_id,
-                self.max_memory_results,
-                self.recent_message_limit,
-            ),
-            ([], []),
-        )
-        return format_context(memories, messages)
+        memories = self._run(lambda db: retrieve_memories(db, query, self.max_memory_results), [])
+        return format_context(memories)
+
+    def user_name(self) -> str | None:
+        identity = self._run(lambda db: db.memories_by_category("identity", 1), [])
+        if not identity:
+            return None
+        match = re.match(r"my name is (.+)", identity[0].content, re.IGNORECASE)
+        return match.group(1).strip() if match else None
+
+    # -- long-term memory -------------------------------------------------
 
     @staticmethod
     def _category(content: str) -> str:
         lowered = content.lower()
         if re.match(r"my name is ", lowered):
             return "identity"
-        if "prefer" in lowered or "favorite" in lowered or "favourite" in lowered:
+        if lowered.startswith("to-do:"):
+            return "todo"
+        if re.search(r"\b(?:prefer|favorite|favourite|like|love|hate)\b", lowered):
             return "preference"
-        if "project" in lowered or "building" in lowered or "called" in lowered:
+        if re.search(r"\b(?:project|building)\b", lowered):
             return "project"
         return "fact"
 
@@ -128,75 +165,78 @@ class MemoryService:
         clean = re.sub(r"\s+", " ", content.strip()).strip(" .!?\n")
         if not clean:
             return None
-        database = self.database
-        if not self.available or database is None:
-            return None
         memory_category = category or self._category(clean)
         if memory_category == "identity":
             # Identity is singular: a corrected name replaces the old one.
-            self._run(lambda: database.delete_memories_by_category("identity"), 0)
+            self._run(lambda db: db.delete_memories_by_category("identity"), 0)
+        importance = 3 if memory_category == "identity" else 2 if memory_category in {"preference", "people"} else 1
         return self._run(
-            lambda: database.add_or_update_memory(
-                memory_category, clean, 1, self._now()
-            ),
+            lambda db: db.add_or_update_memory(memory_category, clean, importance, self._now()),
             None,
         )
 
+    @staticmethod
+    def _terms(text: str) -> list[str]:
+        words = re.findall(r"[a-z0-9][a-z0-9+#-]*", text.lower())
+        return [word for word in dict.fromkeys(words) if len(word) >= 3 and word not in STOP_WORDS]
+
     def forget(self, query: str) -> int:
+        """Delete memories containing every significant word of ``query``.
+
+        Short or pronoun-only queries ("it", "that") delete the most recent
+        memory instead of every memory that happens to contain those letters.
+        """
+
         clean = re.sub(r"\s+", " ", query.strip()).strip(" .!?\n")
-        if not clean:
+        if clean.lower() in _PRONOUN_QUERIES:
+            latest = self._run(lambda db: db.latest_memory(), None)
+            if latest is None:
+                return 0
+            return self._run(lambda db: db.delete_memory(latest.id), 0)
+        terms = self._terms(clean)
+        if not terms:
             return 0
-        # Search terms make "forget my editor" useful without requiring the
-        # user to repeat the stored sentence verbatim.
-        terms = [term for term in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9+#.-]{2,}", clean.lower())]
-        database = self.database
-        if not self.available or database is None:
-            return 0
-        deleted = self._run(lambda: database.delete_memories_matching(terms or [clean]), 0)
-        # Prevent a forgotten fact from being reintroduced through recent
-        # conversation context on the next question.
-        self._run(lambda: database.delete_messages_matching_all(terms or [clean]), 0)
+        deleted = self._run(lambda db: db.delete_memories_matching_all(terms), 0)
+        if deleted:
+            # Keep a forgotten fact from resurfacing through conversation history.
+            self._run(lambda db: db.delete_messages_matching_all(terms), 0)
         return deleted
 
-    def list_memories(self) -> list[LongTermMemory]:
-        database = self.database
-        if not self.available or database is None:
-            return []
-        return self._run(lambda: database.all_memories(self.max_memory_results), [])
+    def list_memories(self, limit: int = 50) -> list[LongTermMemory]:
+        return self._run(lambda db: db.all_memories(limit), [])
 
     def clear_memories(self) -> int:
-        database = self.database
-        if not self.available or database is None:
-            return 0
-        return self._run(lambda: database.clear_memories(), 0)
+        return self._run(lambda db: db.clear_memories(), 0)
 
     def clear_conversation(self) -> int:
-        database = self.database
-        if not self.available or database is None:
-            return 0
-        return self._run(lambda: database.clear_conversation(self.session_id), 0)
+        return self._run(lambda db: db.clear_conversation(self.session_id), 0)
 
     def handle_intent(self, intent: Intent) -> SkillResult:
         """Execute a validated memory intent through the normal skill router."""
+
         if not self.available:
-            return SkillResult(False, "Local memory is unavailable, but I can still handle other requests.")
+            return SkillResult(False, "My memory store is unavailable right now, but everything else still works.")
         if intent.name == "remember_memory":
             content = intent.parameters.get("content", "")
             memory = self.remember(content if isinstance(content, str) else "")
-            return SkillResult(bool(memory), "Got it. I’ll remember that." if memory else "Tell me what you want me to remember.")
+            return SkillResult(bool(memory), "Got it. I'll remember that." if memory else "Tell me what you want me to remember.")
         if intent.name == "forget_memory":
             query = intent.parameters.get("query", "")
+            if intent.parameters.get("latest"):
+                query = ""
             count = self.forget(query if isinstance(query, str) else "")
-            return SkillResult(True, "I forgot that memory." if count else "I couldn’t find a matching memory.")
+            if not count:
+                return SkillResult(True, "I couldn't find a matching memory.")
+            return SkillResult(True, "Done, I've forgotten that." if count == 1 else f"Done, I've forgotten {count} related memories.")
         if intent.name == "list_memories":
             memories = self.list_memories()
             if not memories:
-                return SkillResult(True, "I don’t have any saved memories.")
-            return SkillResult(True, "I remember:\n" + "\n".join(f"- {memory.content}" for memory in memories))
+                return SkillResult(True, "I don't have anything saved about you yet.")
+            return SkillResult(True, "Here's what I remember:\n" + "\n".join(f"- {memory.content}" for memory in memories))
         if intent.name == "clear_memories":
             count = self.clear_memories()
             return SkillResult(True, f"Cleared {count} saved memor{'y' if count == 1 else 'ies'}.")
         if intent.name == "clear_conversation":
             count = self.clear_conversation()
             return SkillResult(True, f"Cleared {count} messages from this conversation.")
-        return SkillResult(False, "I don’t have a safe memory operation for that request.")
+        return SkillResult(False, "I don't have a safe memory operation for that request.")

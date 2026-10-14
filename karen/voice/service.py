@@ -1,7 +1,8 @@
-"""Orchestration for optional local voice input and output."""
+"""Orchestration for local voice input and output."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Protocol
@@ -18,7 +19,11 @@ class ApplicationLike(Protocol):
 
 @dataclass(slots=True)
 class VoiceService:
-    """Connect local speech adapters to the shared Karen application service."""
+    """Connect a recognizer and a speaker to the shared application service.
+
+    With a streaming speaker (``SpeechOutput``) the reply is spoken sentence by
+    sentence while it is still being generated.
+    """
 
     application: ApplicationLike
     recognizer: SpeechRecognizer
@@ -29,19 +34,35 @@ class VoiceService:
     def __post_init__(self) -> None:
         self._lock = Lock()
 
-    def listen_and_process(self) -> VoiceResponse:
-        """Capture one utterance, process it, and optionally speak the response."""
+    def listen_and_process(
+        self,
+        on_transcript: Callable[[str], None] | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> VoiceResponse:
+        """Capture one utterance, process it, and speak the response."""
 
         if not self._lock.acquire(blocking=False):
             raise VoiceError("Voice input is already being processed.")
         try:
             self.state = VoiceState.LISTENING
             transcript = self.recognizer.transcribe_once()
-            self.state = VoiceState.TRANSCRIBING
-            response = self.application.handle_text(transcript)
-            if self.speaker is not None:
-                self.state = VoiceState.SPEAKING
-                self.speaker.speak(response.message)
+            if on_transcript is not None:
+                on_transcript(transcript)
+            self.state = VoiceState.THINKING
+            feed = getattr(self.speaker, "feed", None)
+            if feed is not None:
+                def chunk(text: str) -> None:
+                    feed(text)
+                    if on_chunk is not None:
+                        on_chunk(text)
+
+                response = self.application.handle_text(transcript, on_chunk=chunk)  # type: ignore[call-arg]
+                self.speaker.flush()  # type: ignore[union-attr]
+            else:
+                response = self.application.handle_text(transcript)
+                if self.speaker is not None:
+                    self.state = VoiceState.SPEAKING
+                    self.speaker.speak(response.message)
             self.state = VoiceState.READY
             return VoiceResponse(transcript, response.message)
         except VoiceError:

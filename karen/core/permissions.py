@@ -10,7 +10,13 @@ from .intent import Intent
 
 
 CONFIRMATION_REQUIRED_INTENTS = frozenset(
-    {"close_application", "send_whatsapp_message", "clear_memories", "clear_conversation"}
+    {
+        "close_application",
+        "send_whatsapp_message",
+        "clear_memories",
+        "clear_conversation",
+        "clear_reminders",
+    }
 )
 
 

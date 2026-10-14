@@ -123,7 +123,7 @@ def test_current_information_returns_live_search_results(monkeypatch) -> None:
             return self
         def __exit__(self, *args):
             return None
-        def read(self):
+        def read(self, *_args):
             return html.encode()
 
     monkeypatch.setattr("karen.web.current_info.urlopen", lambda request, timeout: Response())

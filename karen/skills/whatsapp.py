@@ -56,12 +56,17 @@ class _WhatsAppWorker:
             self._startup_error = error
             self._started.set()
 
-    def execute(self, operation: Callable[[Any], Any], timeout: float = 45.0) -> Any:
+    def execute(self, operation: Callable[[Any], Any], timeout: float = 120.0) -> Any:
+        # The timeout must exceed the sum of the page waits inside an operation,
+        # otherwise we could report failure while the message is still sent.
         finished = threading.Event()
         result: dict[str, Any] = {}
         self._requests.put((operation, finished, result))
         if not finished.wait(timeout=timeout):
-            raise WhatsAppAutomationError("WhatsApp Web operation timed out.")
+            raise WhatsAppAutomationError(
+                "WhatsApp Web is taking too long. Check WhatsApp before retrying, "
+                "because the message may still be delivered."
+            )
         if "error" in result:
             raise result["error"]
         return result.get("value")
@@ -167,7 +172,8 @@ def _send_on_page(context: Any, contact: str, message: str) -> None:
         if lines and " ".join(lines[0].lower().split()) == normalized_contact:
             matching_rows.append(candidate)
     if len(matching_rows) != 1:
-        title_result = page.locator(f'[title="{contact}"]').first
+        escaped_contact = contact.replace("\\", "\\\\").replace('"', '\\"')
+        title_result = page.locator(f'[title="{escaped_contact}"]').first
         if title_result.is_visible():
             matching_rows.append(title_result)
     if len(matching_rows) != 1:
@@ -218,12 +224,14 @@ def _send_on_page(context: Any, contact: str, message: str) -> None:
         timeout=10_000,
     )
     send_button.click()
-    sent_message = page.get_by_text(message, exact=True).last
+    # Verify using the first line: multi-line messages render as separate text nodes.
+    first_line = next((line.strip() for line in message.splitlines() if line.strip()), message)
+    sent_message = page.get_by_text(first_line, exact=False).last
     try:
         sent_message.wait_for(state="visible", timeout=10_000)
     except Exception as error:
         raise WhatsAppAutomationError(
-            "WhatsApp did not verify the exact message after sending."
+            "I clicked send but couldn't confirm the message appeared. Please check WhatsApp before resending."
         ) from error
 
 
