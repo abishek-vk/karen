@@ -1,2 +1,20 @@
+# Core (required)
 psutil>=5.9
+
+# Voice replies with the built-in Windows voices (recommended; Karen falls back
+# to PowerShell speech without it)
+comtypes>=1.4
+
+# Better web search results (optional; Karen falls back to DuckDuckGo HTML / Bing)
+ddgs>=9.0
+
+# Voice input: microphone + local speech recognition
+numpy>=1.26
+sounddevice>=0.4
+faster-whisper>=1.0
+
+# Optional "Hey Jarvis" wake word
+openwakeword>=0.6
+
+# Development
 pytest>=8.0

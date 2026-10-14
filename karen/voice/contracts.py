@@ -16,18 +16,19 @@ class VoiceState(StrEnum):
     READY = "ready"
     LISTENING = "listening"
     TRANSCRIBING = "transcribing"
+    THINKING = "thinking"
     SPEAKING = "speaking"
     ERROR = "error"
 
 
 class SpeechRecognizer(Protocol):
     def transcribe_once(self) -> str:
-        """Capture a short local recording and return its transcript."""
+        """Capture one utterance locally and return its transcript."""
 
 
 class TextToSpeech(Protocol):
     def speak(self, text: str) -> None:
-        """Speak text locally."""
+        """Speak text locally, blocking until finished or stopped."""
 
 
 @dataclass(frozen=True, slots=True)

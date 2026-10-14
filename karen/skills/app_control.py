@@ -5,9 +5,11 @@ from __future__ import annotations
 import difflib
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from karen.skills import focus
 from karen.skills.base import SkillResult
 
 
@@ -25,10 +27,29 @@ APPLICATIONS = {
     "explorer": "explorer.exe",
 }
 
-BROWSER_ALIASES = {
+APP_ALIASES = {
     "chrome": "google chrome",
     "edge": "microsoft edge",
+    "vs code": "visual studio code",
+    "vscode": "visual studio code",
+    "code": "visual studio code",
+    "word": "word",
+    "ms word": "word",
+    "microsoft word": "word",
+    "excel": "excel",
+    "powerpoint": "powerpoint",
+    "teams": "microsoft teams",
+    "spotify": "spotify",
+    "camera": "camera",
+    "paint": "paint",
+    "terminal": "terminal",
+    "command prompt": "command prompt",
 }
+# Kept for backwards compatibility with older imports.
+BROWSER_ALIASES = APP_ALIASES
+_EXCLUDED_SHORTCUT_WORDS = ("uninstall", "readme", "documentation", "help", "release notes", "website")
+_REFRESH_INTERVAL_SECONDS = 30.0
+_last_refresh = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +84,7 @@ def _catalog_directories() -> tuple[Path, ...]:
 def refresh_application_catalog() -> dict[str, CatalogEntry]:
     """Discover Start Menu shortcuts without executing or importing them."""
 
-    global _catalog
+    global _catalog, _last_refresh
     catalog: dict[str, CatalogEntry] = {}
     for directory in _catalog_directories():
         if not directory.exists():
@@ -72,9 +93,12 @@ def refresh_application_catalog() -> dict[str, CatalogEntry]:
             if path.suffix.lower() not in {".lnk", ".url"}:
                 continue
             name = _application_name(path.stem)
+            if name and any(word in name for word in _EXCLUDED_SHORTCUT_WORDS):
+                continue
             if name and name not in catalog:
                 catalog[name] = CatalogEntry(name, path, shortcut=True)
     _catalog = catalog
+    _last_refresh = time.monotonic()
     return dict(catalog)
 
 
@@ -94,34 +118,31 @@ def resolve_application_name(target: str | None) -> str | None:
     choices = available_applications()
     if name in choices:
         return name
-    alias = BROWSER_ALIASES.get(name)
+    alias = APP_ALIASES.get(name)
     if alias in choices:
         return alias
-    matches = difflib.get_close_matches(name, choices, n=1, cutoff=0.72)
+    # A high cutoff avoids launching a different app than the one asked for.
+    matches = difflib.get_close_matches(name, choices, n=1, cutoff=0.8)
     return matches[0] if matches else None
 
 
 def _launch_catalog_entry(name: str) -> SkillResult:
     catalog = _catalog if _catalog is not None else refresh_application_catalog()
-    discovered = catalog.get(name)
-    if discovered is None:
-        discovered = catalog.get(BROWSER_ALIASES.get(name, ""))
-    if discovered is None:
-        # Apps can be installed after Karen starts, so refresh once before
-        # falling back to PATH or reporting that the application is missing.
+    alias = APP_ALIASES.get(name, "")
+    discovered = catalog.get(name) or catalog.get(alias)
+    if discovered is None and time.monotonic() - _last_refresh > _REFRESH_INTERVAL_SECONDS:
+        # Apps can be installed after Karen starts, so refresh (rate-limited)
+        # before falling back to PATH or reporting that the app is missing.
         catalog = refresh_application_catalog()
-        discovered = catalog.get(name) or catalog.get(BROWSER_ALIASES.get(name, ""))
-    if discovered is None and catalog:
-        # Built-in aliases such as "vs code" may resolve to an executable
-        # that is not on PATH. Prefer a high-confidence Start Menu shortcut.
-        close_match = difflib.get_close_matches(name, catalog, n=1, cutoff=0.55)
-        if close_match:
-            discovered = catalog[close_match[0]]
+        discovered = catalog.get(name) or catalog.get(alias)
+    hints = [name, alias]
+    before = focus.snapshot()
     if discovered is not None:
         try:
             os.startfile(str(discovered.launch_path))  # type: ignore[attr-defined]
         except OSError:
             return SkillResult(False, f"I couldn't open {name.title()}.")
+        focus.bring_to_front(before, [*hints, discovered.name, discovered.launch_path.stem])
         return SkillResult(True, f"Opening {name.title()}.")
 
     executable = APPLICATIONS.get(name)
@@ -134,6 +155,7 @@ def _launch_catalog_entry(name: str) -> SkillResult:
         subprocess.Popen([executable], shell=False, close_fds=True)
     except OSError:
         return SkillResult(False, f"I couldn't open {name.title()}.")
+    focus.bring_to_front(before, [*hints, Path(executable).stem])
     return SkillResult(True, f"Opening {name.title()}.")
 
 

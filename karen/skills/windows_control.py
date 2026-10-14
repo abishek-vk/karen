@@ -6,6 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from . import focus
 from .base import SkillResult
 
 
@@ -30,10 +31,12 @@ def open_windows_settings() -> SkillResult:
 
     if os.name != "nt":
         return SkillResult(False, "Windows controls are available on Windows only.")
+    before = focus.snapshot()
     try:
         os.startfile("ms-settings:")  # type: ignore[attr-defined]
     except OSError:
         return SkillResult(False, "I couldn't open Windows Settings.")
+    focus.bring_to_front(before, ["Settings"])
     return SkillResult(True, "Opening Windows Settings.")
 
 
@@ -42,10 +45,12 @@ def open_task_manager() -> SkillResult:
 
     if os.name != "nt":
         return SkillResult(False, "Windows controls are available on Windows only.")
+    before = focus.snapshot()
     try:
         subprocess.Popen(["taskmgr.exe"], shell=False, close_fds=True)
     except OSError:
         return SkillResult(False, "I couldn't open Task Manager.")
+    focus.bring_to_front(before, ["Task Manager"])
     return SkillResult(True, "Opening Task Manager.")
 
 
@@ -63,8 +68,10 @@ def open_folder(target: str | None) -> SkillResult:
         return SkillResult(False, "Windows controls are available on Windows only.")
     if not folder.exists():
         return SkillResult(False, f"Your {name.title()} folder was not found.")
+    before = focus.snapshot()
     try:
         os.startfile(str(folder))  # type: ignore[attr-defined]
     except OSError:
         return SkillResult(False, f"I couldn't open {name.title()}.")
+    focus.bring_to_front(before, [folder.name])
     return SkillResult(True, f"Opening {name.title()}.")

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Karen</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/" } }
+  </script>
+</head>
+<body data-mode="booting">
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <!-- Boot sequence -->
+  <section id="boot" class="boot" aria-live="polite">
+    <div class="boot-title" data-text="KAREN">KAREN</div>
+    <div class="boot-sub">PERSONAL INTELLIGENCE · LOCAL CORE</div>
+    <ol id="boot-log" class="boot-log"></ol>
+    <div id="boot-bar" class="boot-bar"><span></span></div>
+  </section>
+
+  <main id="hud" class="hud">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"><span></span></div>
+        <div>
+          <div class="brand-name">K A R E N</div>
+          <div class="brand-sub">PERSONAL INTELLIGENCE · LOCAL CORE</div>
+        </div>
+      </div>
+      <div class="status-pill" role="status">
+        <span class="status-dot"></span>
+        <span id="status-text">INITIALIZING</span>
+      </div>
+      <div class="clock">
+        <div id="clock-time">--:--</div>
+        <div id="clock-date" class="mono"></div>
+      </div>
+    </header>
+
+    <aside class="panel panel-left glass">
+      <div class="panel-head"><span class="tick"></span>SYSTEM TELEMETRY</div>
+      <div class="metric">
+        <div class="metric-row"><span class="label">CPU</span><span id="cpu-value" class="value">--</span></div>
+        <div class="bar"><span id="cpu-bar"></span></div>
+      </div>
+      <div class="metric">
+        <div class="metric-row"><span class="label">MEMORY</span><span id="ram-value" class="value">--</span></div>
+        <div class="bar"><span id="ram-bar"></span></div>
+      </div>
+      <div class="label spaced">CPU · LAST 60 S</div>
+      <canvas id="spark" class="spark" width="260" height="86"></canvas>
+      <div class="label spaced">LOCAL MODEL</div>
+      <div id="model-status" class="value small">CHECKING…</div>
+    </aside>
+
+    <aside class="panel panel-right glass">
+      <div class="panel-head"><span class="tick"></span>SESSION</div>
+      <dl class="fields">
+        <dt>STATE</dt><dd id="f-state">INITIALIZING</dd>
+        <dt>VOICE OUTPUT</dt><dd id="f-voice">--</dd>
+        <dt>WAKE WORD</dt><dd id="f-wake">--</dd>
+        <dt>NEXT REMINDER</dt><dd id="f-reminder">NONE</dd>
+        <dt>UPTIME</dt><dd id="f-uptime" class="mono">00:00:00</dd>
+      </dl>
+    </aside>
+
+    <section class="captions" aria-live="polite">
+      <div id="heard" class="heard"></div>
+      <div id="reply" class="reply"></div>
+      <div id="sources" class="sources"></div>
+    </section>
+
+    <footer class="dock">
+      <div class="dock-row">
+        <button id="talk" class="orb" title="Talk (Ctrl+Space)" aria-label="Talk">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <span class="orb-ring"></span>
+        </button>
+        <form id="composer" class="composer glass" autocomplete="off">
+          <input id="input" type="text" placeholder="Ask Karen anything…" aria-label="Message" disabled>
+          <button id="send" class="btn btn-primary" type="submit" disabled>SEND</button>
+        </form>
+        <button id="stop" class="btn btn-danger" title="Stop (Esc)">STOP</button>
+      </div>
+      <div class="toggles">
+        <button id="t-voice" class="chip" data-toggle="voice">VOICE <b>--</b></button>
+        <button id="t-wake" class="chip" data-toggle="wake">WAKE WORD <b>--</b></button>
+        <button id="t-history" class="chip">HISTORY</button>
+      </div>
+      <div class="hints mono">ENTER SEND · CTRL+SPACE TALK · ESC STOP · CTRL+H HISTORY · F11 FULLSCREEN · CTRL+Q QUIT</div>
+    </footer>
+  </main>
+
+  <aside id="history" class="history glass" aria-label="Conversation history">
+    <div class="panel-head"><span class="tick"></span>CONVERSATION</div>
+    <div id="history-list" class="history-list"></div>
+  </aside>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

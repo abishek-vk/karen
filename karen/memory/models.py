@@ -22,3 +22,12 @@ class LongTermMemory:
     importance: int
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class Reminder:
+    id: int
+    text: str
+    due_at: str
+    created_at: str
+    delivered: int

@@ -7,9 +7,6 @@ dist/
 build/
 *.egg-info/
 
-# Local runtime state and credentials
-/data/*.json
-/data/*.log
-/data/voice/
-/data/whatsapp_profile/
-/data/memory.db
+# Local runtime state, personal data and credentials — never commit these.
+/data/
+/config/preferences.json

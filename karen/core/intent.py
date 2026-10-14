@@ -25,6 +25,11 @@ SUPPORTED_INTENTS = frozenset(
         "clear_memories",
         "clear_conversation",
         "current_information",
+        "open_website",
+        "system_control",
+        "set_reminder",
+        "list_reminders",
+        "clear_reminders",
     }
 )
 
