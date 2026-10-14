@@ -16,7 +16,7 @@ from karen.skills.base import SkillResult
 
 from .database import MemoryDatabase
 from .models import LongTermMemory
-from .retrieval import STOP_WORDS, format_context, retrieve_memories
+from .retrieval import STOP_WORDS, earlier_statements, format_context, retrieve_memories
 
 LOGGER = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -28,20 +28,51 @@ _NAME = rf"(?!{_NAME_STOP})[a-z][a-z.'-]*(?: (?!{_NAME_STOP})[a-z][a-z.'-]*){{0,
 _FACT_PATTERNS: tuple[tuple[str, str], ...] = (
     (rf"my name is (?P<v>{_NAME})", "identity"),
     (rf"(?:call me|you can call me|i am called|i'm called)(?: as)? (?P<v>{_NAME})", "identity"),
-    (r"my (?:favorite|favourite|preferred) .+ (?:is|are) .+", "preference"),
-    (r"i (?:really )?(?:like|love|enjoy|prefer|hate|dislike) .+", "preference"),
+    (r"my (?:favorite|favourite|fav|fave|preferred) .+ (?:is|are) .+", "preference"),
+    # "I love you" / "I like you" is said to Karen, not a fact about the user.
+    (r"i (?:really )?(?:like|love|enjoy|prefer|hate|dislike) (?!(?:you|u|ya|karen|jarvis)\b).+", "preference"),
     (r"i(?:'m| am) allergic to .+", "fact"),
     (r"i (?:live|stay) in .+", "fact"),
     (r"i(?:'m| am) from .+", "fact"),
     (r"my birthday is .+", "fact"),
     (r"i was born (?:on|in) .+", "fact"),
     (r"i (?:work|study) (?:at|in|for|as) .+", "fact"),
-    (r"my (?:wife|husband|partner|mom|mother|dad|father|brother|sister|son|daughter|friend|boss|"
-     r"girlfriend|boyfriend|dog|cat)(?:'s name)? is .+", "people"),
+    (r"my (?:best |close |childhood )?(?:wife|husband|partner|mom|mother|dad|father|brother|sister|son|daughter|"
+     r"friend|boss|girlfriend|boyfriend|dog|cat|teacher|roommate|cousin|uncle|aunt|grandma|grandpa|grandmother|"
+     r"grandfather|classmate|mentor|manager|crush|pet)(?:'?s)?(?: name)? is .+", "people"),
     (r"this project is called .+", "project"),
     (r"i(?:'m| am) (?:building|working on|developing) .+", "project"),
 )
 _PRONOUN_QUERIES = frozenset({"", "it", "that", "this"})
+_THIRD_PERSON_VERBS = {
+    "likes": "like", "loves": "love", "enjoys": "enjoy", "prefers": "prefer", "hates": "hate",
+    "dislikes": "dislike", "lives": "live", "stays": "stay", "studies": "study", "works": "work", "is": "am",
+}
+
+
+def _main_clause(text: str) -> str:
+    """Drop a trailing question or aside: "I like Tony Stark, do you know him?" -> "I like Tony Stark"."""
+
+    clause = re.split(
+        r"[;?]|,\s*(?=(?:do|did|does|can|could|is|are|was|what|who|how|why|its|it's|he's|she's|you)\b)",
+        text.strip(), maxsplit=1, flags=re.IGNORECASE,
+    )[0]
+    return clause.strip().rstrip(".!")
+
+
+def _first_person(sentence: str, name: str | None) -> str:
+    """People often talk about themselves by name: "Abi's best friend is X" -> "my best friend is X"."""
+
+    if not name:
+        return sentence
+    own = re.escape(name.split()[0])
+    sentence = re.sub(rf"^{own}(?:'s|’s|s'|s| 's)\s+", "my ", sentence, flags=re.IGNORECASE)
+    return re.sub(
+        rf"^{own}\s+({'|'.join(_THIRD_PERSON_VERBS)})\b",
+        lambda match: "i " + _THIRD_PERSON_VERBS[match.group(1).lower()],
+        sentence,
+        flags=re.IGNORECASE,
+    )
 
 
 class MemoryService:
@@ -121,7 +152,7 @@ class MemoryService:
 
         if re.match(r"(?:please )?(?:remember|save|note)\b", content, re.IGNORECASE):
             return
-        sentence = content.strip().rstrip(".!?")
+        sentence = _first_person(_main_clause(content), self.user_name())
         for pattern, category in _FACT_PATTERNS:
             if category == "identity":
                 match = re.match(pattern + r"(?=$|[ ,.;!]|\s+(?:and|but)\b)", sentence, re.IGNORECASE)
@@ -138,7 +169,11 @@ class MemoryService:
 
     def context_for(self, query: str) -> str:
         memories = self._run(lambda db: retrieve_memories(db, query, self.max_memory_results), [])
-        return format_context(memories)
+        statements = self._run(lambda db: earlier_statements(db, query), [])
+        saved = " ".join(memory.content.lower() for memory in memories)
+        # Skip statements already captured as saved facts.
+        statements = [text for text in statements if text.lower().rstrip(".!") not in saved]
+        return format_context(memories, statements)
 
     def user_name(self) -> str | None:
         identity = self._run(lambda db: db.memories_by_category("identity", 1), [])

@@ -154,3 +154,28 @@ def test_clear_memory_command_requires_existing_confirmation_flow(tmp_path: Path
     assert prompt.success is False
     assert application.handle_text("yes").success is True
     assert service.list_memories() == []
+
+
+def test_facts_said_in_third_person_by_name_are_remembered(tmp_path: Path) -> None:
+    service = MemoryService(tmp_path / "karen.db")
+    service.record_message("user", "My name is Abi.")
+    service.record_message("user", "abi likes tony stark, do you know him its a character in marvel;")
+    service.record_message("user", "abi's best friend name is shanju")
+    service.record_message("user", "my fav character in marvel is tony stark")
+    service.record_message("user", "i love you")
+    contents = [memory.content for memory in service.list_memories()]
+    assert "i like tony stark" in contents
+    assert "my best friend name is shanju" in contents
+    assert "my fav character in marvel is tony stark" in contents
+    assert "i love you" not in contents  # said to Karen, not a fact about the user
+
+
+def test_unrecognised_statements_are_still_found_later(tmp_path: Path) -> None:
+    service = MemoryService(tmp_path / "karen.db", recent_message_limit=2)
+    service.record_message("user", "shanju and abi met in school in 2015")
+    for filler in ("tell me a joke", "what is 2 plus 2", "open notepad"):
+        service.record_message("user", filler)
+    service.record_message("user", "where did i meet shanju")
+    context = service.context_for("where did i meet shanju")
+    assert "shanju and abi met in school in 2015" in context
+    assert "where did i meet shanju" not in context.lower().split("\n", 1)[-1]

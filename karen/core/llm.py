@@ -198,7 +198,10 @@ class LocalLLM:
         lines = [f"Current local date and time: {_now_text()}."]
         you = f"You did, {user_name}" if user_name else "You did"
         if user_name:
-            lines.append(f"The user's name is {user_name}.")
+            lines.append(
+                f"The user's name is {user_name}. They sometimes talk about themselves by name "
+                f'("{user_name} likes ...", "{user_name}\'s friend ..."), which always means the user.'
+            )
         lines.append(
             "The person you are talking to is your creator and developer: they designed, built and programmed you. "
             f'If asked who made, built or created you, answer them directly, e.g. "{you}. You designed and built me."'
