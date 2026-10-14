@@ -1,15 +1,26 @@
-"""Run Karen's graphical (default) or terminal interface."""
+"""Run Karen's 3D interface (default), the classic HUD, or the terminal."""
 
 from __future__ import annotations
 
 import argparse
 
 
+def _preferred_style() -> str:
+    try:
+        from .app import PROJECT_DIR
+        from .config import ConfigurationStore
+
+        return ConfigurationStore(PROJECT_DIR / "config").load_settings().ui_style.strip().lower()
+    except Exception:  # Settings problems are reported later by the runtime.
+        return "3d"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Karen AI local assistant")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--ui", action="store_true", help="launch the animated HUD (default)")
-    mode.add_argument("--text", action="store_true", help="use the terminal instead of the HUD")
+    mode.add_argument("--ui", action="store_true", help="launch the 3D interface (default)")
+    mode.add_argument("--classic", action="store_true", help="launch the lightweight Tk HUD instead of 3D")
+    mode.add_argument("--text", action="store_true", help="use the terminal instead of a window")
     parser.add_argument("--voice", action="store_true", help="terminal mode: talk with the microphone")
     speech = parser.add_mutually_exclusive_group()
     speech.add_argument("--speak", action="store_true", help="speak replies aloud")
@@ -21,10 +32,16 @@ def main() -> None:
         from .text_app import main as text_main
 
         text_main(speak=speak, voice=args.voice)
-    else:
-        from .ui.opening import launch
+        return
+    if not args.classic and (args.ui or _preferred_style() != "classic"):
+        from .ui import web_app
 
-        launch(speak=speak)
+        if web_app.available():
+            web_app.launch(speak=speak)
+            return
+    from .ui.opening import launch
+
+    launch(speak=speak)
 
 
 if __name__ == "__main__":

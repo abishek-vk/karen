@@ -43,6 +43,9 @@ class Settings:
 
     # Assistant
     assistant_name: str = "Karen"
+    ui_style: str = "3d"  # "3d" (WebGL window, ~450 MB) or "classic" (Tk HUD, ~130 MB).
+    ui_fullscreen: bool = True
+    ui_reduced_motion: bool = False  # Calmer, lower-CPU HUD without rotation or boot animation.
     privacy_mode: bool = True
     start_with_windows: bool = False
     log_level: str = "INFO"

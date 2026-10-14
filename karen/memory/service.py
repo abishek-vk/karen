@@ -22,11 +22,12 @@ LOGGER = logging.getLogger(__name__)
 T = TypeVar("T")
 
 # Up to three words, stopping before "and", "but" or punctuation.
-_NAME = r"[a-z][a-z.'-]*(?: (?!and\b|but\b|from\b|i\b)[a-z][a-z.'-]*){0,2}"
+_NAME_STOP = r"(?:and|but|from|i|that|thats|that's|it|its|it's|is|my|please|ok|okay|now|here|for|as)\b"
+_NAME = rf"(?!{_NAME_STOP})[a-z][a-z.'-]*(?: (?!{_NAME_STOP})[a-z][a-z.'-]*){{0,2}}"
 # User statements that are safe to promote to long-term memory automatically.
 _FACT_PATTERNS: tuple[tuple[str, str], ...] = (
     (rf"my name is (?P<v>{_NAME})", "identity"),
-    (rf"(?:call me|you can call me|i am called|i'm called) (?P<v>{_NAME})", "identity"),
+    (rf"(?:call me|you can call me|i am called|i'm called)(?: as)? (?P<v>{_NAME})", "identity"),
     (r"my (?:favorite|favourite|preferred) .+ (?:is|are) .+", "preference"),
     (r"i (?:really )?(?:like|love|enjoy|prefer|hate|dislike) .+", "preference"),
     (r"i(?:'m| am) allergic to .+", "fact"),

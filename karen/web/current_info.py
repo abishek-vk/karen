@@ -11,10 +11,10 @@ from __future__ import annotations
 import html
 import json
 import logging
+import math
 import re
 import threading
 import time
-import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -86,13 +86,17 @@ class CurrentInfoService:
     def search(self, query: str, limit: int = 3) -> list[SearchResult]:
         if not self.enabled or not query.strip():
             return []
-        authoritative = self._search_current_office_holder(query)
+        authoritative = self._search_current_office_holder(query) or self._search_software_version(query)
         if authoritative:
             return authoritative[:limit]
-        for provider in (self._search_ddgs, self._search_duckduckgo_html, self._search_bing):
-            results = provider(query, limit)
+        terms = _query_terms(query)
+        query = _with_current_year(query)
+        for provider in (self._search_ddgs, self._search_duckduckgo_html, self._search_duckduckgo_lite, self._search_wikipedia):
+            # Ask for a few extra results so off-topic ones can be dropped and
+            # trusted sites ranked first.
+            results = _rank_by_trust(_on_topic(provider(query, limit + 3), terms))
             if results:
-                return results
+                return results[:limit]
         return []
 
     def _search_ddgs(self, query: str, limit: int) -> list[SearchResult]:
@@ -103,11 +107,17 @@ class CurrentInfoService:
                 from duckduckgo_search import DDGS  # type: ignore[import-not-found]
         except ImportError:
             return []
-        try:
-            rows = DDGS(timeout=int(self.timeout_seconds)).text(query.strip(), max_results=limit)
-        except Exception as error:  # pragma: no cover - network/library dependent
-            LOGGER.warning("ddgs search failed: %s", error)
-            return []
+        rows = None
+        # "auto" sometimes picks engines that are blocked from this network, so
+        # try the reliable ones in order and stop at the first with results.
+        for backend in ("duckduckgo", "yahoo", "bing"):
+            try:
+                rows = DDGS(timeout=int(self.timeout_seconds)).text(query.strip(), max_results=limit, backend=backend)
+            except Exception as error:  # pragma: no cover - network/library dependent
+                LOGGER.info("ddgs %s search failed: %s", backend, error)
+                continue
+            if rows:
+                break
         return [
             SearchResult(_clean_html(row.get("title", "")), _clean_html(row.get("body", "")), row.get("href", ""))
             for row in rows or []
@@ -119,24 +129,44 @@ class CurrentInfoService:
         document = self._get_text(url, user_agent=_BROWSER_UA)
         return self._parse_results(document, limit) if document else []
 
-    def _search_bing(self, query: str, limit: int) -> list[SearchResult]:
-        url = "https://www.bing.com/search?format=rss&q=" + quote_plus(query.strip())
+    def _search_duckduckgo_lite(self, query: str, limit: int) -> list[SearchResult]:
+        url = "https://lite.duckduckgo.com/lite/?q=" + quote_plus(query.strip())
         document = self._get_text(url, user_agent=_BROWSER_UA)
         if not document:
             return []
+        links = re.findall(
+            r"<a[^>]+href=\"([^\"]+)\"[^>]*class=['\"]result-link['\"][^>]*>(.*?)</a>", document, re.IGNORECASE | re.DOTALL
+        )
+        snippets = re.findall(r"class=['\"]result-snippet['\"][^>]*>(.*?)</td>", document, re.IGNORECASE | re.DOTALL)
+        results = []
+        for index, (link, title) in enumerate(links):
+            target = _resolve_redirect(html.unescape(link))
+            if (urlparse(target).hostname or "").endswith("duckduckgo.com"):  # ads and help pages
+                continue
+            snippet = _clean_html(snippets[index]) if index < len(snippets) else ""
+            results.append(SearchResult(_clean_html(title), snippet, target))
+        return results[:limit]
+
+    def _search_wikipedia(self, query: str, limit: int) -> list[SearchResult]:
+        """Last resort: Wikipedia's own search, which is reliable but not always current."""
+
+        url = (
+            "https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1"
+            f"&srlimit={max(1, limit)}&srsearch=" + quote_plus(query.strip())
+        )
+        document = self._get_text(url)
         try:
-            root = ET.fromstring(document)
-        except ET.ParseError as error:
-            LOGGER.warning("Fallback live information lookup failed: %s", error)
+            rows = json.loads(document).get("query", {}).get("search", []) if document else []
+        except (json.JSONDecodeError, AttributeError):
             return []
-        results: list[SearchResult] = []
-        for item in root.findall("./channel/item")[:limit]:
-            title = item.findtext("title", default="").strip()
-            snippet = item.findtext("description", default="").strip()
-            link = item.findtext("link", default="").strip()
-            if title or snippet:
-                results.append(SearchResult(title, _clean_html(snippet), link))
-        return results
+        return [
+            SearchResult(
+                row["title"], _clean_html(row.get("snippet", "")),
+                "https://en.wikipedia.org/wiki/" + quote(row["title"].replace(" ", "_")),
+            )
+            for row in rows
+            if isinstance(row, dict) and row.get("title")
+        ]
 
     def _search_current_office_holder(self, query: str) -> list[SearchResult]:
         """Answer "who is the <role> of <place>" from the Wikipedia infobox ``incumbent``."""
@@ -181,6 +211,76 @@ class CurrentInfoService:
                 "https://en.wikipedia.org/wiki/" + quote(str(page).replace(" ", "_")),
             )
         ]
+
+    def _search_software_version(self, query: str) -> list[SearchResult]:
+        """Answer "latest version of X" from release data instead of web pages, which
+        are often months out of date: endoflife.date first, then the project's GitHub releases."""
+
+        product = parse_version_question(query)
+        if product is None:
+            return []
+        return self._version_from_endoflife(product) or self._version_from_github(product)
+
+    def _version_from_endoflife(self, product: str) -> list[SearchResult]:
+        slug = _ENDOFLIFE_SLUGS.get(product, re.sub(r"[^a-z0-9]+", "-", product).strip("-"))
+        document = self._get_text(f"https://endoflife.date/api/{quote(slug)}.json")
+        try:
+            cycles = json.loads(document) if document else []
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(cycles, list) or not cycles or not isinstance(cycles[0], dict) or not cycles[0].get("latest"):
+            return []
+        name = _display_name(product)
+        newest = cycles[0]
+        text = f"According to endoflife.date, the latest {name} release is {newest['latest']}"
+        if newest.get("latestReleaseDate"):
+            text += f", released on {newest['latestReleaseDate']}"
+        text += "."
+        today = time.strftime("%Y-%m-%d")
+        lts = next(
+            (
+                cycle for cycle in cycles
+                if isinstance(cycle, dict) and isinstance(cycle.get("lts"), (str, bool)) and cycle.get("lts")
+                and (cycle["lts"] is True or str(cycle["lts"]) <= today)
+            ),
+            None,
+        )
+        if lts is not None and lts is not newest:
+            text += f" The newest long-term support (LTS) line is {name} {lts.get('cycle')}, currently {lts.get('latest')}."
+        return [SearchResult(f"Latest {name} version", text, f"https://endoflife.date/{slug}")]
+
+    def _version_from_github(self, product: str) -> list[SearchResult]:
+        repo_name = re.sub(r"[^a-z0-9]+", "-", product).strip("-")
+        document = self._get_text(
+            "https://api.github.com/search/repositories?sort=stars&per_page=5&q=" + quote_plus(f"{product} in:name")
+        )
+        try:
+            items = json.loads(document).get("items", []) if document else []
+        except (json.JSONDecodeError, AttributeError):
+            return []
+        repo = next(
+            (
+                item for item in items
+                if isinstance(item, dict) and str(item.get("name", "")).lower() == repo_name
+                and int(item.get("stargazers_count") or 0) >= 1000
+            ),
+            None,
+        )
+        if repo is None:
+            return []
+        document = self._get_text(f"https://api.github.com/repos/{repo['full_name']}/releases/latest")
+        try:
+            release = json.loads(document) if document else {}
+        except json.JSONDecodeError:
+            return []
+        tag = release.get("tag_name") if isinstance(release, dict) else None
+        if not tag:
+            return []
+        published = str(release.get("published_at") or "")[:10]
+        name = _display_name(product)
+        text = f"According to the official {repo['full_name']} GitHub releases page, the latest {name} release is {tag}"
+        text += f", published on {published}." if published else "."
+        return [SearchResult(f"Latest {name} release", text, str(release.get("html_url") or repo.get("html_url", "")))]
 
     # -- research ---------------------------------------------------------
 
@@ -371,9 +471,112 @@ def _query_terms(query: str) -> list[str]:
     return [word for word in dict.fromkeys(words) if word not in _STOP]
 
 
+_RECENCY_WORDS = re.compile(r"\b(?:last|latest|current|currently|recent|newest|now|today|this year)\b", re.IGNORECASE)
+
+
+_VERSION_QUESTION = re.compile(
+    r"(?:latest|newest|current|most recent)\s+(?:stable\s+|lts\s+)?(?:version|release)\s+of\s+(?:the\s+)?(?P<a>.+)"
+    r"|(?:latest|newest|current|most recent)\s+(?:stable\s+)?(?P<b>[a-z0-9.+# -]+?)\s+(?:version|release)\b"
+    r"|(?:what|which)\s+version\s+of\s+(?P<c>.+?)\s+is\s+(?:the\s+)?(?:latest|newest|current)",
+    re.IGNORECASE,
+)
+_NOT_SOFTWARE = frozenset({"iphone", "android phone", "samsung", "galaxy", "pixel", "movie", "song", "film", "car", "the"})
+# Spoken names -> endoflife.date product ids.
+_ENDOFLIFE_SLUGS = {
+    "node": "nodejs", "node.js": "nodejs", "node js": "nodejs", "nodejs": "nodejs", "java": "oracle-jdk",
+    "jdk": "oracle-jdk", ".net": "dotnet", "dotnet": "dotnet", "net": "dotnet", "golang": "go", "go": "go",
+    "postgres": "postgresql", "vue": "vue", "vue.js": "vue", "angular": "angular", "django": "django",
+    "react": "react", "react.js": "react", "linux kernel": "linux", "linux": "linux", "next.js": "nextjs", "nextjs": "nextjs", "c#": "dotnet",
+}
+_DISPLAY_NAMES = {
+    "node": "Node.js", "node.js": "Node.js", "node js": "Node.js", "nodejs": "Node.js", "java": "Java",
+    "jdk": "Java", ".net": ".NET", "dotnet": ".NET", "postgres": "PostgreSQL", "postgresql": "PostgreSQL",
+    "next.js": "Next.js", "nextjs": "Next.js", "vue.js": "Vue.js", "react.js": "React", "php": "PHP",
+    "typescript": "TypeScript", "golang": "Go", "pytorch": "PyTorch", "numpy": "NumPy", "vscode": "VS Code",
+    "vs code": "VS Code",
+}
+
+
+def parse_version_question(text: str) -> str | None:
+    """Return the product in questions like "what's the latest version of Python"."""
+
+    cleaned = re.sub(r"\b(?:19|20)\d{2}\b|[?!]", " ", text.lower())
+    match = _VERSION_QUESTION.search(" ".join(cleaned.split()))
+    if match is None:
+        return None
+    product = next(group for group in match.groups() if group)
+    product = re.sub(r"\s+(?:now|today|right now|currently|available|out|released)$", "", product.strip(" .,'\""))
+    product = re.sub(r"^(?:the|a|an)\s+", "", product).strip()
+    if not product or len(product.split()) > 3 or product in _NOT_SOFTWARE:
+        return None
+    return product
+
+
+def _display_name(product: str) -> str:
+    return _DISPLAY_NAMES.get(product, product if any(char.isupper() for char in product) else product.title())
+
+
+def _with_current_year(query: str) -> str:
+    """Bias "latest/last/current" searches toward this year's pages."""
+
+    if _RECENCY_WORDS.search(query) and not re.search(r"\b(?:19|20)\d{2}\b", query):
+        return f"{query} {time.localtime().tm_year}"
+    return query
+
+
+def _normalized(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _on_topic(results: list[SearchResult], terms: list[str]) -> list[SearchResult]:
+    """Drop results that share no meaningful word with the question (search engines
+    sometimes return unrelated filler, which would otherwise be read as fact)."""
+
+    if not terms:
+        return results
+    needed = 2 if len(terms) >= 3 else 1
+    kept = []
+    for result in results:
+        haystack = f"{result.title} {result.snippet} {result.url}".lower()
+        if sum(1 for term in terms if term in haystack) >= needed:
+            kept.append(result)
+    return kept
+
+
+# Primary/official sources and established references; content farms rank last.
+_TRUSTED_HOSTS = (
+    "wikipedia.org", "endoflife.date", "britannica.com", "python.org", "nodejs.org", "npmjs.com", "pypi.org", "github.com",
+    "developer.mozilla.org", "learn.microsoft.com", "microsoft.com", "apple.com", "google.com", "android.com",
+    "react.dev", "kotlinlang.org", "go.dev", "rust-lang.org", "oracle.com", "openjdk.org", "docs.",
+    "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "thehindu.com", "indianexpress.com", "ndtv.com",
+    "timesofindia.indiatimes.com", "hindustantimes.com", "espncricinfo.com", "espn.com", "fifa.com", "iplt20.com",
+    "who.int", "cdc.gov", "nih.gov", "mayoclinic.org", "nasa.gov", "rbi.org.in", "imd.gov.in", "un.org",
+    "worldbank.org", "imf.org", "nature.com", "sciencedirect.com", "theverge.com", "techcrunch.com", "forbes.com",
+    "bloomberg.com", "cnbc.com", "coindesk.com", "coinmarketcap.com", "xe.com",
+)
+_LOW_QUALITY_HOSTS = ("quora.com", "pinterest.", "answers.com", "brainly.", "chegg.com", "scribd.com", "medium.com")
+
+
+def _trust(url: str) -> int:
+    host = (urlparse(url).hostname or "").lower()
+    if any(part in host for part in _LOW_QUALITY_HOSTS):
+        return -1
+    if host.endswith((".gov", ".gov.in", ".gov.uk", ".edu", ".ac.in", ".ac.uk", ".nic.in", ".int")):
+        return 2
+    return 1 if any(part in host for part in _TRUSTED_HOSTS) else 0
+
+
+def _rank_by_trust(results: list[SearchResult]) -> list[SearchResult]:
+    """Stable sort: trusted sources first, otherwise keep the search engine's order."""
+
+    return sorted(results, key=lambda result: -_trust(result.url))
+
+
 class _TextExtractor(HTMLParser):
     _SKIP = frozenset({"script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form", "button", "select", "iframe"})
-    _BLOCK = frozenset({"p", "div", "li", "h1", "h2", "h3", "h4", "td", "th", "tr", "section", "article", "br", "dd", "dt", "blockquote"})
+    _BLOCK = frozenset({"p", "div", "li", "h1", "h2", "h3", "h4", "tr", "section", "article", "br", "dd", "dt", "blockquote", "caption"})
+    # Table cells stay on their row's line so rows like "2026 | Spain | 1-0 | Argentina" survive.
+    _CELL = frozenset({"td", "th"})
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -410,32 +613,93 @@ def extract_text(document: str) -> str:
     return "\n".join(line for line in lines if len(line) > 40)
 
 
+# Pages rarely repeat the question's exact words ("who won" -> "Spain defeated").
+_SYNONYM_GROUPS = (
+    ("won", "win", "wins", "winner", "winning", "champion", "defeated", "beat", "victory", "lifted"),
+    ("last", "latest", "most recent", "newest", "recent"),
+    ("latest", "last", "most recent", "newest", "current", "stable"),
+    ("price", "cost", "trading at", "rate", "value"),
+    ("version", "release", "released"),
+    ("ceo", "chief executive"),
+    ("richest", "wealthiest", "net worth"),
+)
+_SYNONYMS = {group[0]: group for group in _SYNONYM_GROUPS}
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“(])")
+_WINDOW_CHARS = 280
+
+
+def _windows(paragraph: str) -> list[str]:
+    """Split a paragraph into runs of whole sentences of at most ~280 characters,
+    so one long paragraph can't use up (or be dropped from) the excerpt budget."""
+
+    if len(paragraph) <= _WINDOW_CHARS:
+        return [paragraph]
+    windows: list[str] = []
+    current = ""
+    for sentence in _SENTENCE_SPLIT.split(paragraph):
+        sentence = sentence[:_WINDOW_CHARS]
+        if current and len(current) + len(sentence) + 1 > _WINDOW_CHARS:
+            windows.append(current)
+            current = sentence
+        else:
+            current = f"{current} {sentence}".strip()
+    if current:
+        windows.append(current)
+    return windows
+
+
 def relevant_passages(text: str, terms: list[str], max_chars: int) -> str:
-    """Pick the paragraphs that mention the most query terms, in page order."""
+    """Pick the sentence runs that best match the question, in page order."""
 
     paragraphs = [paragraph for paragraph in text.split("\n") if paragraph]
     if not paragraphs:
         return ""
     if not terms:
         return " ".join(paragraphs)[:max_chars]
+    year = time.localtime().tm_year
+    this_year, last_year = str(year), str(year - 1)
+    # A question that names its own year doesn't need a recency bonus.
+    recency = not any(re.fullmatch(r"(?:19|20)\d{2}", term) for term in terms)
+    windows = [
+        (position, window, {term for term in terms if any(word in window.lower() for word in _SYNONYMS.get(term, (term,)))})
+        for position, window in enumerate(window for paragraph in paragraphs[:400] for window in _windows(paragraph))
+    ]
+    # Words found all over the page (its topic, e.g. "IPL", "2026") say little about
+    # where the answer is; rarer ones ("won" -> "defeated") do. Weight terms by rarity.
+    # Intent words ("won", "latest", "price") name what is being asked, so they
+    # count triple compared with topic words.
+    weights = {
+        term: math.log(1 + len(windows) / (1 + sum(1 for _p, _w, hits in windows if term in hits)))
+        * (3 if term in _SYNONYMS else 1)
+        for term in terms
+    }
+    total_weight = sum(weights.values()) or 1.0
     scored = []
-    for index, paragraph in enumerate(paragraphs[:400]):
-        lowered = paragraph.lower()
-        hits = sum(1 for term in terms if term in lowered)
-        if hits:
-            # Prefer dense, mid-length paragraphs that contain numbers/dates.
-            score = hits / len(terms) + (0.15 if re.search(r"\d", paragraph) else 0) - (0.2 if len(paragraph) > 900 else 0)
-            scored.append((score, index, paragraph))
+    for position, window, hits in windows:
+        if not hits:
+            continue
+        # Prefer passages with numbers/dates; footnote lines are a last resort.
+        score = sum(weights[term] for term in hits) / total_weight + (0.15 if re.search(r"\d", window) else 0)
+        if window.startswith(("↑", "^")):
+            score -= 0.15
+        # "Latest"/"who won" questions need the newest facts, not the page intro.
+        if recency and this_year in window:
+            score += 0.5
+        elif recency and last_year in window:
+            score += 0.25
+        scored.append((score, position, window))
     if not scored:
         return ""
     chosen: list[tuple[int, str]] = []
     total = 0
-    for _score, index, paragraph in sorted(scored, key=lambda item: (-item[0], item[1])):
-        snippet = paragraph[:600]
-        if total + len(snippet) > max_chars:
+    seen: set[str] = set()
+    for _score, index, window in sorted(scored, key=lambda item: (-item[0], item[1])):
+        if total + len(window) > max_chars or window in seen:
             continue
-        chosen.append((index, snippet))
-        total += len(snippet)
+        seen.add(window)
+        chosen.append((index, window))
+        total += len(window)
         if total >= max_chars * 0.8:
             break
-    return "\n".join(paragraph for _index, paragraph in sorted(chosen))
+    return "\n".join(window for _index, window in sorted(chosen))

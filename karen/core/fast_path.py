@@ -76,6 +76,11 @@ _EXPLICIT_SEARCH = re.compile(
     r"(?:search|google|look up|lookup|find out|research)"
     r"(?: on)?(?: the web| online| the internet| internet| google)?(?: for| about| on)? (.+)"
 )
+_FOLLOW_UP = re.compile(
+    r"\b(?:he|she|they|him|her|them|his|hers|their|its|it)\b|"
+    r"\b(?:that|this|those|these|the same) (?:team|person|man|woman|player|company|country|state|club|one|movie|film|"
+    r"game|match|show|book|song|city|party|guy|phone|model|series|event|tournament)\b"
+)
 _FOLDERS = (
     "home|user folder|desktop|documents|downloads|pictures|photos|videos|music|3d objects|favorites"
 )
@@ -169,9 +174,17 @@ def parse_fast_path(text: str) -> Intent | None:
     if search:
         return Intent("current_information", None, {"query": search.group(1).strip()}, False)
 
-    if needs_live_information(source):
+    # "Who was the captain of that team?" only makes sense with the conversation,
+    # so let the model (which sees the history) write the search query.
+    if needs_live_information(source) and not _FOLLOW_UP.search(command):
         return Intent("current_information", None, {"query": source}, False)
     return None
+
+
+def is_follow_up(text: str) -> bool:
+    """Does this refer back to the conversation ("that team", "he", "they")?"""
+
+    return bool(_FOLLOW_UP.search(_command_form(clean_utterance(text))))
 
 
 def needs_live_information(text: str) -> bool:

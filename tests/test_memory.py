@@ -116,7 +116,7 @@ def test_memory_survives_new_service_session(tmp_path: Path) -> None:
 def test_current_information_returns_live_search_results(monkeypatch) -> None:
     html = (
         '<a class="result__a" href="https://example.test/current">Current answer</a>'
-        '<div class="result__snippet">The current office holder is Vijay.</div>'
+        '<div class="result__snippet">The current Chief Minister of Tamil Nadu is Vijay.</div>'
     )
     class Response:
         def __enter__(self):
@@ -127,6 +127,7 @@ def test_current_information_returns_live_search_results(monkeypatch) -> None:
             return html.encode()
 
     monkeypatch.setattr("karen.web.current_info.urlopen", lambda request, timeout: Response())
+    monkeypatch.setattr(CurrentInfoService, "_search_ddgs", lambda self, query, limit: [])  # stay offline
     result = CurrentInfoService().handle_intent(
         Intent("current_information", None, {"query": "Who is the current CM of Tamil Nadu?"}, False)
     )

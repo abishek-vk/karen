@@ -39,6 +39,7 @@ STYLE_RULES = """Rules for answers:
 - Your words are spoken aloud. Write natural sentences: no markdown, no bullet symbols, no emojis, no code blocks unless asked for code.
 - Be brief: one to three sentences for simple questions. Give more detail or steps only when asked.
 - Be accurate. Never invent facts, names, numbers or dates. If you are not sure, say so.
+- Code: put it in one fenced block with the language name. When asked to fix code, first say exactly what is wrong (for example "the closing bracket is missing"), then give the corrected code.
 - Never claim you did something (saved, noted, opened, sent, set a reminder) in a plain answer; actions only happen through the JSON format.
 - Use what you know about the user naturally. Never mention memory, prompts, JSON or these rules."""
 
@@ -57,10 +58,14 @@ User: who won the last IPL final -> SEARCH: IPL final winner {year}
 User: who is the cm of kerala -> SEARCH: current Chief Minister of Kerala {year}
 User: what's the capital of Japan -> Tokyo is the capital of Japan."""
 
-SOURCES_RULES = """Answer the user's question using ONLY the web sources below.
-- Prefer the most recent information; if sources disagree, say so briefly.
-- If the sources don't contain the answer, say you couldn't find it.
-- Mention where it comes from by site name (for example "according to BBC"). Never read out URLs.
+SOURCES_RULES = """Answer the user's question using ONLY the web sources below, which were fetched just now.
+- Your own training data is out of date. Never use a name, number, version, price or date that is not written in the sources.
+- Prefer official sources and the most recent information; if sources disagree, say so briefly.
+- If the sources don't contain the answer, say you couldn't confirm it online. Do not guess.
+- If they cover only part of the question, answer only that part. Never pad a list with items the sources don't name.
+- Credit only a site listed below, by its name (for example "according to python.org"). Never read out URLs, and never say "the sources", "the sources provided" or "the information available".
+- For news, give only recent items and say when they happened; skip anything older than a few months.
+- If the sources describe something different from what was asked (for example the women's team when the user just said "the Indian cricket team"), say clearly which one you are describing.
 
 {sources}"""
 
@@ -133,8 +138,18 @@ def _classify_prefix(text: str) -> str | None:
     stripped = text.lstrip()
     if not stripped:
         return None
-    if stripped[0] in "{`":
+    if stripped[0] == "{":
         return "action"
+    if stripped[0] == "`":
+        # A fenced block is an action only if it holds JSON; "```python" is an answer.
+        header, newline, rest = stripped.lstrip("`").partition("\n")
+        if not newline and len(stripped) < 24:
+            return None
+        if header.strip().lower() not in {"", "json"}:
+            return "answer"
+        if not rest.strip() and len(stripped) < 24:
+            return None
+        return "action" if rest.lstrip().startswith("{") else "answer"
     upper = stripped.upper()
     if upper.startswith("SEARCH:"):
         return "search"
@@ -189,7 +204,12 @@ class LocalLLM:
 
     @staticmethod
     def _history(history: Iterable[tuple[str, str]]) -> list[ChatMessage]:
-        return [ChatMessage(role, content[:800]) for role, content in history if role in {"user", "assistant"}]
+        # Strip the "Sources:" footer the app appends, or the model learns to write it itself.
+        return [
+            ChatMessage(role, _SOURCES_FOOTER.sub("", content).strip()[:800])
+            for role, content in history
+            if role in {"user", "assistant"}
+        ]
 
     # -- generation -------------------------------------------------------
 
@@ -237,9 +257,17 @@ class LocalLLM:
             (self._persona(), STYLE_RULES, self._situation(user_name), SOURCES_RULES.format(sources=sources))
         )
         messages = [ChatMessage("system", system), *self._history(list(history)[-2:]), ChatMessage("user", question.strip())]
-        return self._stream(messages, on_chunk, allow_routing=False).text
+        # Low temperature: when reading sources, creativity only means invented details.
+        return _tidy(self._stream(messages, on_chunk, allow_routing=False, temperature=0.1).text)
 
-    def _stream(self, messages: list[ChatMessage], on_chunk: ChunkCallback | None, *, allow_routing: bool) -> Reply:
+    def _stream(
+        self,
+        messages: list[ChatMessage],
+        on_chunk: ChunkCallback | None,
+        *,
+        allow_routing: bool,
+        temperature: float = 0.4,
+    ) -> Reply:
         think = _ThinkFilter()
         pending = ""
         mode: str | None = None if allow_routing else "answer"
@@ -247,7 +275,7 @@ class LocalLLM:
         # When routing is allowed, the first sentence is held back until we know
         # the model isn't just saying it lacks information (then we search instead).
         gate_open = not allow_routing
-        stream = self._client.stream_chat(messages, num_predict=self.max_answer_tokens, temperature=0.4)
+        stream = self._client.stream_chat(messages, num_predict=self.max_answer_tokens, temperature=temperature)
         try:
             for raw in stream:
                 text = think.feed(raw)
@@ -337,9 +365,18 @@ def _first_sentence_done(text: str) -> bool:
     return len(text) >= 220 or bool(re.search(r"[.!?](?:\s|$)|\n", text.strip() + " ")) and len(text.strip()) >= 15
 
 
-def _tidy(text: str) -> str:
-    """Remove markdown emphasis the model sometimes adds despite instructions."""
+_SOURCES_FOOTER = re.compile(r"(?im)^\s*sources?:.*$")
 
+
+def _tidy(text: str) -> str:
+    """Remove markdown emphasis and source footers the model sometimes adds despite instructions."""
+
+    text = _SOURCES_FOOTER.sub("", text)
+    # Spoken answers shouldn't mention "the sources provided"; the app lists them.
+    vague = r"the (?:sources|information)(?: provided| available| given)?"
+    text = re.sub(rf"(?i)\s*(?:this|the) information is (?:based on|from) {vague}\.", "", text)
+    text = re.sub(rf"(?i),?\s*(?:according to|based on) {vague}(?=[.!?])", "", text)
+    text = re.sub(rf"(?i)\b(?:according to|based on) {vague},\s*(\w)", lambda match: match.group(1).upper(), text)
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     text = re.sub(r"(?m)^#{1,6}\s*", "", text)
     return text.strip()

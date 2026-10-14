@@ -34,6 +34,7 @@ def clean_for_speech(text: str) -> str:
         lines.append(stripped)
     spoken = " ".join(line for line in lines if line)
     spoken = _URL.sub("", spoken)
+    spoken = re.sub(r"(?<=\w)_(?=\w)", " ", spoken)  # reverse_string -> "reverse string"
     spoken = re.sub(r"[*_`#>|]", "", spoken)
     spoken = spoken.replace("°C", " degrees Celsius").replace("°F", " degrees Fahrenheit")
     spoken = spoken.replace("km/h", "kilometres per hour").replace("&", " and ")
@@ -49,6 +50,7 @@ class SpeechOutput:
         self.enabled = engine is not None
         self._queue: queue.Queue[tuple[int, str] | None] = queue.Queue()
         self._buffer = ""
+        self._in_code = False
         self._generation = 0
         self._lock = threading.Lock()
         self._speaking = threading.Event()
@@ -92,6 +94,17 @@ class SpeechOutput:
             complete, self._buffer = pieces[:-1], pieces[-1]
             sentence = ""
             for piece in complete:
+                if piece.strip().startswith("```"):
+                    # Code is for the screen; reading it aloud symbol by symbol is useless.
+                    if sentence:
+                        self._enqueue(sentence)
+                        sentence = ""
+                    self._in_code = not self._in_code
+                    if self._in_code:
+                        self._enqueue("I've put the code on screen.")
+                    continue
+                if self._in_code:
+                    continue
                 sentence = f"{sentence} {piece}".strip() if sentence else piece.strip()
                 # Don't split after "Dr." and similar, and avoid tiny fragments.
                 if _ABBREVIATIONS.search(sentence) or len(sentence) < 12:
@@ -99,12 +112,14 @@ class SpeechOutput:
                 self._enqueue(sentence)
                 sentence = ""
             if sentence:
-                self._buffer = f"{sentence} {self._buffer}".strip()
+                # Keep the buffer's trailing space, or the next streamed word gets glued on.
+                self._buffer = f"{sentence} {self._buffer}".lstrip()
 
     def flush(self) -> None:
         with self._lock:
             remainder, self._buffer = self._buffer, ""
-            if remainder.strip():
+            in_code, self._in_code = self._in_code, False
+            if remainder.strip() and not in_code and not remainder.strip().startswith("```"):
                 self._enqueue(remainder)
 
     def _enqueue(self, text: str) -> None:
@@ -120,6 +135,7 @@ class SpeechOutput:
         with self._lock:
             self._generation += 1
             self._buffer = ""
+            self._in_code = False
             try:
                 while True:
                     self._queue.get_nowait()

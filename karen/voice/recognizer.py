@@ -53,6 +53,8 @@ class FasterWhisperRecognizer:
         self._model: Any | None = None
         self._model_lock = threading.Lock()
         self._cancel = threading.Event()
+        # Live microphone loudness (0..1) for UI visualizers; 0 when not recording.
+        self.level = 0.0
 
     # -- model ------------------------------------------------------------
 
@@ -118,6 +120,7 @@ class FasterWhisperRecognizer:
                     data, _overflowed = stream.read(block)
                     samples = data[:, 0].copy()
                     level = float(np.sqrt(np.mean(samples * samples)))
+                    self.level = min(1.0, level * 12.0)
                     if index < 8:
                         # Calibrate to the room's background noise first.
                         noise.append(level)
@@ -139,6 +142,8 @@ class FasterWhisperRecognizer:
             raise
         except Exception as error:  # pragma: no cover - device dependent
             raise VoiceError(f"Could not record from the microphone: {error}") from error
+        finally:
+            self.level = 0.0
         if not captured:
             raise VoiceError("I didn't hear anything.")
         return np.concatenate(captured)

@@ -11,10 +11,12 @@ Request flow:
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -25,7 +27,7 @@ from karen.skills.base import SkillManifest
 from karen.web import CurrentInfoService
 
 from .confirmation import ConfirmationManager, parse_confirmation
-from .fast_path import clean_utterance, needs_live_information, parse_fast_path
+from .fast_path import clean_utterance, is_follow_up, needs_live_information, parse_fast_path
 from .intent import Intent, parse_intent
 from .llm import LocalLLM
 from .router import IntentRouter
@@ -47,6 +49,49 @@ _CLAIMED_ACTION = re.compile(
     r"i(?:'ll| will) remind you|reminder (?:is )?set|noted that|i've made a note)\b",
     re.IGNORECASE,
 )
+
+
+_FIX_REQUEST = re.compile(r"\b(?:fix|debug|error|bug|wrong|broken|not working|doesn't work|does not work)\b", re.IGNORECASE)
+_FENCED = re.compile(r"```(?:python|py)?\s*\n?(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _python_syntax_note(text: str) -> str:
+    """For "fix this Python code", report what Python's own parser says.
+
+    A small model easily misses an unclosed bracket; the parser never does. The
+    code is only compiled (parsed), never executed.
+    """
+
+    if "python" not in text.lower() or not _FIX_REQUEST.search(text):
+        return ""
+    fenced = _FENCED.search(text)
+    code = fenced.group(1) if fenced else text.split(":", 1)[1] if ":" in text else ""
+    code = code.strip()
+    if not code or len(code) > 4000:
+        return ""
+    try:
+        compile(code, "<user code>", "exec")
+    except SyntaxError as error:
+        return f"Python's syntax check of the user's code reports: SyntaxError: {error.msg} (line {error.lineno})."
+    except (ValueError, OverflowError):
+        return ""
+    return ""
+
+
+@contextmanager
+def _keep_awake() -> Iterator[None]:
+    """Stop Windows idling into sleep mid-answer (a CPU answer can take a minute)."""
+
+    set_state = getattr(getattr(getattr(ctypes, "windll", None), "kernel32", None), "SetThreadExecutionState", None)
+    if set_state is None:
+        yield
+        return
+    es_continuous, es_system_required = 0x80000000, 0x00000001
+    set_state(es_continuous | es_system_required)
+    try:
+        yield
+    finally:
+        set_state(es_continuous)
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +210,7 @@ class ApplicationService:
             if on_chunk is not None:
                 on_chunk(value)
 
-        with self._lock:
+        with self._lock, _keep_awake():
             history = self.memory.recent_turns()
             self.memory.record_message("user", cleaned)
             try:
@@ -210,6 +255,12 @@ class ApplicationService:
         intent = parse_fast_path(text)
         if intent is not None:
             return self._with_prefix(prefix, self._execute(intent, "fast_path", text, history, on_chunk, on_status))
+        previous = next((content for role, content in reversed(history) if role == "user"), "")
+        if previous and is_follow_up(text) and needs_live_information(text) and isinstance(self.llm, LocalLLM):
+            # "Who was the captain of that team?" still needs live data; the earlier
+            # question supplies the context for the search, and the answer step sees
+            # the conversation to resolve "that team".
+            return self._with_prefix(prefix, self._research(f"{previous} {text}", text, history, on_chunk, on_status))
         return self._with_prefix(prefix, self._ask_model(text, history, on_chunk, on_status))
 
     @staticmethod
@@ -228,7 +279,7 @@ class ApplicationService:
         try:
             reply = self.llm.respond(
                 text,
-                memory_context=self.memory.context_for(text),
+                memory_context="\n".join(filter(None, (self.memory.context_for(text), _python_syntax_note(text)))),
                 history=history,
                 user_name=self.memory.user_name(),
                 on_chunk=on_chunk,
